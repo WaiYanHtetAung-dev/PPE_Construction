@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "Detection": {
+      "additionalProperties": false,
+      "properties": {
+        "class_key": {
+          "enum": [
+            "person",
+            "helmet",
+            "vest"
+          ],
+          "title": "Class Key",
+          "type": "string"
+        },
+        "original_class": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Original Class",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Score",
+          "type": "number"
+        },
+        "bbox_xyxy": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Bbox Xyxy",
+          "type": "array"
+        },
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Attributes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "class_key",
+        "original_class",
+        "score",
+        "bbox_xyxy"
+      ],
+      "title": "Detection",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "frame_id": {
+      "title": "Frame Id",
+      "type": "string"
+    },
+    "model_key": {
+      "title": "Model Key",
+      "type": "string"
+    },
+    "model_version": {
+      "title": "Model Version",
+      "type": "string"
+    },
+    "inference_ms": {
+      "minimum": 0,
+      "title": "Inference Ms",
+      "type": "number"
+    },
+    "detections": {
+      "items": {
+        "$ref": "#/$defs/Detection"
+      },
+      "title": "Detections",
+      "type": "array"
+    }
+  },
+  "required": [
+    "request_id",
+    "frame_id",
+    "model_key",
+    "model_version",
+    "inference_ms",
+    "detections"
+  ],
+  "title": "InferenceResponse",
+  "type": "object"
+}

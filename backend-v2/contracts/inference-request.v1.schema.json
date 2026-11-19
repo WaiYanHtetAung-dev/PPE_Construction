@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "FrameRef": {
+      "additionalProperties": false,
+      "properties": {
+        "object_key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Object Key",
+          "type": "string"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "maximum": 16384,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "maximum": 16384,
+          "title": "Height",
+          "type": "integer"
+        },
+        "content_type": {
+          "enum": [
+            "image/jpeg",
+            "image/png"
+          ],
+          "title": "Content Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "object_key",
+        "width",
+        "height",
+        "content_type"
+      ],
+      "title": "FrameRef",
+      "type": "object"
+    },
+    "InferenceOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence_threshold": {
+          "default": 0.35,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence Threshold",
+          "type": "number"
+        }
+      },
+      "title": "InferenceOptions",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "frame_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Frame Id",
+      "type": "string"
+    },
+    "model_key": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Model Key",
+      "type": "string"
+    },
+    "model_version": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Model Version",
+      "type": "string"
+    },
+    "frame": {
+      "$ref": "#/$defs/FrameRef"
+    },
+    "options": {
+      "$ref": "#/$defs/InferenceOptions"
+    }
+  },
+  "required": [
+    "request_id",
+    "frame_id",
+    "model_key",
+    "model_version",
+    "frame"
+  ],
+  "title": "InferenceRequest",
+  "type": "object"
+}
