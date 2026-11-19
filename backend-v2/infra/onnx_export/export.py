@@ -17,11 +17,10 @@ def digest(path):
 
 
 def main():
-    source_hash, approval, image, expected_version, lock, mode = sys.argv[1:]
-    if expected_version not in ('8.4.102', '8.4.96') or version('ultralytics') != expected_version:
-        raise RuntimeError('Exporter must match the approved toolchain profile')
-    if digest(Path('/build/requirements.lock')) != lock:
-        raise RuntimeError('Exporter wheel lock does not match the approved digest')
+    from preflight import verify_runtime
+
+    source_hash, approval, image, expected_version, lock, mode, rights_approval = sys.argv[1:]
+    verify_runtime(expected_version, lock)
     source, local = Path('/input/finalboss.pt'), Path('/tmp/finalboss.pt')
     shutil.copyfile(source, local)
     if digest(local) != source_hash:
@@ -41,6 +40,7 @@ def main():
         with Path('/output/reference-toolchain.json').open('x', encoding='utf-8') as stream:
             json.dump({'approval': approval, 'image': image, 'lock_sha256': lock,
                        'source_sha256': source_hash, 'ultralytics': expected_version,
+                       'rights_approval': rights_approval,
                        'torch': version('torch'), 'opencv': __import__('cv2').__version__}, stream, indent=2)
         return
     if mode != 'export':
@@ -63,7 +63,7 @@ def main():
         stream.write(graph.SerializeToString())
     record = {
         'approval': approval, 'exporter_image': image, 'source_sha256': source_hash,
-        'lock_sha256': lock,
+        'lock_sha256': lock, 'rights_approval': rights_approval,
         'artifact_sha256': digest(target), 'artifact_bytes': target.stat().st_size,
         'versions': {name: version(name) for name in ('ultralytics', 'torch', 'onnx')},
         'metadata': {'task': model.task, 'labels': LABELS},

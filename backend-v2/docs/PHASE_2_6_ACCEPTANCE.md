@@ -24,7 +24,8 @@ compatibility check.
 docker build --pull=false --network=none --build-arg EXPORT_BASE=<approved-base@sha256:digest> \
   -f infra/onnx_export/Dockerfile -t <local-exporter-tag> <approved-wheelhouse-directory>
 python infra/onnx_export/run_offline.py <path-to-original-finalboss.pt> <new-external-output> \
-  --toolchains <approved-external-toolchains.json> --version 8.4.102
+  --toolchains <approved-external-toolchains.json> --approval-dir <approved-record-directory> \
+  --rights-approval <checkpoint-rights-record> --version 8.4.102
 ```
 
 The dual-version toolchain configuration and runner commands are in [Phase 2.6-B](PHASE_2_6_OFFLINE_WORKFLOW.md). Preload the approved immutable digests before running. The sandbox receives only the read-only checkpoint and

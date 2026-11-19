@@ -14,6 +14,8 @@ The inspected original Finalboss digest is
 Static metadata reports training on YOLO11m with Ultralytics 8.4.102. V1 pins
 8.4.96. Neither version has been selected for release.
 
+Run the [Phase 2.6-C readiness checks](PHASE_2_6_READINESS.md) before mounting the checkpoint.
+
 ## Approved exporter inputs
 
 Copy `infra/onnx_export/toolchains.example.json` outside Git. Each entry
@@ -28,9 +30,11 @@ context. Preload and verify both final image digests on the offline host.
 
 ```sh
 python infra/onnx_export/run_offline.py "$CHECKPOINT" "$REVIEW_ROOT/export-102" \
-  --toolchains "$REVIEW_ROOT/toolchains.json" --version 8.4.102
+  --toolchains "$REVIEW_ROOT/toolchains.json" --approval-dir "$REVIEW_ROOT/approvals" \
+  --rights-approval "$CHECKPOINT_RIGHTS_APPROVAL" --version 8.4.102
 python infra/onnx_export/run_offline.py "$CHECKPOINT" "$REVIEW_ROOT/export-96" \
-  --toolchains "$REVIEW_ROOT/toolchains.json" --version 8.4.96
+  --toolchains "$REVIEW_ROOT/toolchains.json" --approval-dir "$REVIEW_ROOT/approvals" \
+  --rights-approval "$CHECKPOINT_RIGHTS_APPROVAL" --version 8.4.96
 python -m infra.onnx_export.compare_exports "$REVIEW_ROOT/export-102" "$REVIEW_ROOT/export-96"
 ```
 
@@ -56,7 +60,8 @@ during export. It permits the corpus only in the 8.4.96 reference run.
 
 ```sh
 python infra/onnx_export/run_offline.py "$CHECKPOINT" "$REVIEW_ROOT/v1-reference" \
-  --toolchains "$REVIEW_ROOT/toolchains.json" --version 8.4.96 --mode reference \
+  --toolchains "$REVIEW_ROOT/toolchains.json" --approval-dir "$REVIEW_ROOT/approvals" \
+  --rights-approval "$CHECKPOINT_RIGHTS_APPROVAL" --version 8.4.96 --mode reference \
   --corpus-manifest "$REVIEW_ROOT/corpus.json" --corpus-root "$REVIEW_ROOT/frames"
 ```
 

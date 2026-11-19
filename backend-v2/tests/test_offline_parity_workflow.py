@@ -2,6 +2,7 @@ import hashlib
 import json
 import sys
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
@@ -54,19 +55,42 @@ def test_export_profiles_only_launch_restricted_local_image(tmp_path, monkeypatc
     image = 'local/exporter@sha256:' + 'a' * 64
     profiles.write_text(json.dumps({release: {'image': image, 'lock_sha256': 'b' * 64, 'approval': 'review-id'}}))
     destination = tmp_path / 'outputs'
+    approvals = tmp_path / 'approvals'
+    approvals.mkdir()
+    source_sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    for record_id, purpose, bindings in (
+        ('synthetic-rights-id', 'checkpoint-rights', {'checkpoint_sha256': source_sha}),
+        ('review-id', 'exporter-toolchain', {'version': release, 'image': image, 'lock_sha256': 'b' * 64}),
+    ):
+        (approvals / (record_id + '.json')).write_text(json.dumps({
+            'id': record_id, 'purpose': purpose, 'status': 'approved', 'bindings': bindings,
+        }))
     calls = []
     monkeypatch.setattr(sys, 'argv', ['run_offline', str(checkpoint), str(destination),
-                                       '--toolchains', str(profiles), '--version', release])
+                                       '--toolchains', str(profiles), '--version', release,
+                                       '--approval-dir', str(approvals), '--rights-approval', 'synthetic-rights-id'])
+    monkeypatch.setattr(run_offline, 'EXPECTED', hashlib.sha256(checkpoint.read_bytes()).hexdigest())
     monkeypatch.setattr(run_offline.os, 'getuid', lambda: 10001, raising=False)
-    monkeypatch.setattr(run_offline.subprocess, 'run', lambda cmd, **kw: calls.append(cmd))
+    def simulate(cmd, **kw):
+        calls.append(cmd)
+        return SimpleNamespace(stdout=json.dumps([{'Os': 'linux', 'Architecture': 'amd64',
+                                                   'RepoDigests': [image], 'Config': {}}]))
+
+    monkeypatch.setattr(run_offline.subprocess, 'run', simulate)
     run_offline.main()
     assert calls[0] == ['docker', 'image', 'inspect', image]
-    cli = calls[1]
+    assert '/tool/preflight.py' in calls[1]
+    assert not any('/input/finalboss.pt' in item for item in calls[1])
+    cli = calls[2]
     assert {'--network=none', '--pull=never', '--read-only', '--cap-drop=ALL'} <= set(cli)
-    assert cli[-3:] == [release, 'b' * 64, 'export']
+    assert cli[-4:] == [release, 'b' * 64, 'export', 'synthetic-rights-id']
     assert str(checkpoint.resolve()) + ',target=/input/finalboss.pt,readonly' in ' '.join(cli)
     assert not any('DATABASE_URL' in option for option in cli)
     assert checkpoint.read_bytes() == b'not a checkpoint'
+    monkeypatch.setattr(sys, 'argv', [*sys.argv[:2], str(tmp_path / 'probe-output'), *sys.argv[3:], '--preflight-only'])
+    calls.clear()
+    run_offline.main()
+    assert len(calls) == 2 and not (tmp_path / 'probe-output').exists()
 
 
 def test_parity_report_fails_score_or_corpus_drift():

@@ -101,3 +101,10 @@ Record an entry after every Codex work slice; never erase past test failures or 
 - Added separate 8.4.102 and 8.4.96 approved-profile configuration, locked local image preflight, offline V1 default-rect/fixed-square captures, approved corpus manifest and a comparison path that binds the signed worker results to live authority evidence for the exact candidate digest.
 - Local Linux full regression during development: 83 passed, 4 skipped; targeted harness/ONNX: 15 passed. Architecture and published contract checks passed. The final suite also covers independent synthetic graph review and is exercised in hosted PR checks. These are synthetic results only.
 - No worker, FastAPI, V1 or schema changes. Rights, actual export, parity, human review and deployment remain separate gates. See PHASE_2_6_OFFLINE_WORKFLOW.md.
+
+### Phase 2.6-C - Offline readiness gates
+
+- Verified the original checkpoint SHA-256. Inventory contained no approved 8.4.102 or 8.4.96 exporter profiles. Approved wheel locks and rights/corpus records were not provided. No checkpoint was mounted or deserialized.
+- Added external approval bindings, local repository digest/platform/volume inspection, host checkpoint hashing and a separate checkpoint-free probe. Both candidate profiles require a complete offline pip resolution from exact binary wheel hashes and matching installed pins before export.
+- The local checkpoint-free Docker probe passed non-root, loopback-only and read-only checks, with no checkpoint mount or database configuration. Local targeted tests returned 8 passed and 2 optional ONNX skips. Real profile, wheel, licensing and corpus readiness remain unverified. Hosted checks track the final commit.
+- No V1, published contract, production or Phase 3 changes. PR #1 remains Draft and human approval remains pending.

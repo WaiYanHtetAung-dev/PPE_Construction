@@ -2,7 +2,7 @@
 
 **Updated** 2026-11-19
 
-**Active phase** Phase 2.6-B offline workflow and parity harness implemented. Real export and parity remain blocked.
+**Active phase** Phase 2.6-C readiness checks implemented. Real exporter preflight, export and parity are blocked by unavailable approved inputs.
 
 [Draft PR #1](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1) targets `main` from `feature/backend-v2-review`. Human approval is pending.
 
@@ -48,6 +48,13 @@ python -m venv .venv
 | Human review | Pending. Draft PR #1 remains open. |
 | Production deployment | No approval or deployment. |
 
+## Phase 2.6-C readiness evidence
+
+- The Finalboss checkpoint matches the recorded SHA-256. No deserialization was performed.
+- A checkpoint-free Linux Docker probe confirmed non-root, loopback-only and read-only controls, without a checkpoint mount or database configuration.
+- Targeted synthetic preflight/workflow suite returned 8 passed, 2 optional ONNX skips on the local Windows venv. The full suite is tracked in hosted PR checks.
+- Approved 8.4.102 and 8.4.96 exporter images and wheel locks, checkpoint rights, corpus and per-image fixture records are missing. Neither profile was run or selected.
+
 ## Next single task
 
-Provision both approved toolchain images and lock digests on the disposable offline host, with signed-off checkpoint rights and corpus. Run the 8.4.102 and 8.4.96 exports and compare before selecting a toolchain. [Offline workflow](PHASE_2_6_OFFLINE_WORKFLOW.md)
+Provision the independent approved image/lock/rights bundles and approved corpus on the disposable offline host. Run checkpoint-free preflight for each profile and the reference corpus using [the readiness runbook](PHASE_2_6_READINESS.md).

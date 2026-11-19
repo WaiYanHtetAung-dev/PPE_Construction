@@ -62,3 +62,14 @@ def read_sample(root, sample):
     if not 0 < len(data) <= MAX_FRAME_BYTES or hashlib.sha256(data).hexdigest() != sample['sha256']:
         raise ValueError('Corpus image size or digest mismatch')
     return data
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('manifest', type=Path)
+    parser.add_argument('root', type=Path)
+    args = parser.parse_args()
+    corpus, digest = load_corpus(args.manifest, args.root)
+    print(json.dumps({'corpus_sha256': digest, 'samples': len(corpus['samples'])}))
