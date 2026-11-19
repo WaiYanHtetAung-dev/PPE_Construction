@@ -2,7 +2,7 @@
 
 **Updated** 2026-11-19
 
-**Active phase** Phase 2.5 inference security integration implemented and locally verified. Human review pending.
+**Active phase** Phase 2.6 CPU ONNX adapter implemented. Finalboss export and V1 parity remain blocked.
 
 [Draft PR #1](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1) targets `main` from `feature/backend-v2-review`. Human approval is pending.
 
@@ -35,6 +35,8 @@ python -m venv .venv
 
 | Phase 2.5 local | Linux: 68 passed, 4 PostgreSQL-only skips. Disposable PostgreSQL 17: 4 integration tests passed. Compose smoke: verified inference 200, revoked inference 503, schema and evidence retained after stopping services. |
 
+| Phase 2.6 local | Actual CPUExecutionProvider ran synthetic ONNX: 10 adapter/security tests passed. Full Linux suite 78 passed, 4 skipped. Disposable PostgreSQL 17 integration: 4 passed. CPU worker image and Compose configuration passed. |
+
 ## Next single task
 
-Review the Phase 2.5 inference boundary and [hosted PR checks](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1/checks). Production adapter, TLS/network, roles and mounts require operational sign-off. Phase 3 remains gated.
+Obtain the approved offline exporter image and wheel lock, confirm Finalboss and fixture rights, and supply the approved de-identified corpus. Then run export and V1 parity under the Phase 2.6 acceptance plan. Human review and production rollout remain gated.

@@ -23,6 +23,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.inference
+      target: ${INFERENCE_DEV_IMAGE_TARGET:-standard}
     command: [uvicorn, 'inference_worker.service:from_environment', --factory, --host, 0.0.0.0, --port, '8080', --limit-concurrency, '8', --no-access-log]
     read_only: true
     cap_drop: [ALL]

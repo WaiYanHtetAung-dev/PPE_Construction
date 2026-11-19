@@ -31,8 +31,9 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend-v2/requirements*.txt
-      - run: python -m pip install -r requirements-dev.txt
-      - run: python -m compileall -q app inference_worker tests scripts
+      - run: python -m pip install -r requirements-dev.txt -r requirements-inference-cpu.txt
+      - run: python -c "import numpy, onnx, onnxruntime; from PIL import Image"
+      - run: python -m compileall -q app inference_worker infra/onnx_export tests scripts
       - run: python -m pytest -q
       - run: python scripts/check_architecture.py
       - run: python scripts/verify_contracts.py

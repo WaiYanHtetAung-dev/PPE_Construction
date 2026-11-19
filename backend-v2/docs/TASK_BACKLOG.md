@@ -10,6 +10,7 @@
 | V2-P2-API2 | 2 | Eligible catalog list/detail, then per-camera assignment GET/PUT, audit, rollback and concurrency tests | Implemented; local and hosted checks passed | Human review pending |
 | V2-P2-GATE | 2 | P2-01 to P2-08 acceptance, PostgreSQL migration, CI and review | Eligibility fix locally verified; human review pending | Hosted fix CI and reviewer approval. Production key/mount/role and inference rollout controls stay gated. |
 | V2-P2.5-INFERENCE | 2.5 | Independent inference worker, fail-closed eligibility leases and compatible rollback | Implemented and locally verified | Hosted PR checks and named human review. Production adapter and workload controls remain gated. |
+| V2-P2.6-API1 | 2.6 | CPU ONNX adapter, offline export and Finalboss detection parity | Adapter and synthetic tests complete; real parity blocked | Approved exporter image/wheel lock, rights clearance and approved real fixture corpus |
 | V2-P3 | 3 | Authenticated idempotent incident ingestion, state machine and outbox | Planned | Approved Phase 3 ADR, Phase 2 contract gate |
 | V2-P4 | 4 | Media gateway / stream lifecycle / bounded inference bridge | Planned | Approved trust boundary + topology |
 | V2-P5 | 5 | Evidence, durable jobs, realtime notifications, reports | Planned | Storage privacy/retention decisions |

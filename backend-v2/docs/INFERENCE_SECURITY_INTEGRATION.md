@@ -55,6 +55,8 @@ an approved model format and release resources in the context manager. The
 service returns 503 without an adapter. CI uses a synthetic adapter and does not
 load production assets or require a GPU.
 
+The opt-in [Phase 2.6 CPU adapter](PHASE_2_6_ACCEPTANCE.md) accepts the fixed Finalboss ONNX candidate profile. Its real-checkpoint export and parity validation remain gated.
+
 ## Development Compose
 
 Use the opt-in profile with the existing base Compose file. Run Alembic through
