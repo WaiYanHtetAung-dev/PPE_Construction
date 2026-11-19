@@ -26,7 +26,10 @@ python -m venv .venv
 | scripts/verify_contracts.py | Passed, exit 0. Checked-in OpenAPI and inference v1 snapshots match. |
 | PostgreSQL 17 migration upgrade/check | Passed on a disposable Docker database. Head is `d2f4a193b0c7`. |
 | PostgreSQL integration | 2 passed. Concurrent duplicate registration and camera assignment races, plus direct metadata/history mutation rejection. |
-| Hosted CI | [Run #2](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44460576958) passed on `71b6fb5`. Unit job: 45 passed, 2 skipped. PostgreSQL 17 job: upgrade/current/drift passed and 2 integration tests passed. |
+| Hosted CI | [Run #4](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44461554789) passed on `544b3f5`. Unit job: 45 passed, 2 skipped. PostgreSQL 17 job: upgrade/current/drift passed and 2 integration tests passed. |
+
+| Disposable PostgreSQL 17 rehearsal | Populated upgrade from `9db36ad49c74` to `d2f4a193b0c7` and schema drift check passed. Local V2 API1-only snapshot rollback and current-app roll-forward retained model revision, assignment, history and audit. |
+| Deployment privileges | Review only. Actual PostgreSQL role grants, verifier credentials and production rollback artifact were not tested. |
 
 ## Next single task
 

@@ -1,6 +1,6 @@
 # Phase 2 Acceptance Checklist — Model registry, versioning and camera assignment API
 
-> STATUS: P2-01 through P2-08 passed in [hosted run #2](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44460576958) on `71b6fb5`. Approval is blocked by artifact eligibility enforcement; human review is pending.
+> STATUS: P2-01 through P2-08 passed in [hosted run #4](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44461554789) on `544b3f5`. Approval is blocked by artifact eligibility enforcement; human review is pending.
 
 | Case | Status | Evidence / link |
 | --- | --- | --- |
@@ -108,5 +108,12 @@ P2-01 tests metadata registration and audit. It does not test artifact retrieval
 - [ ] Enforce eligibility only after verified artifact evidence is recorded. Prove an ordinary writer cannot enable an unverified version or make it available to assignment.
 - [ ] Confirm production publisher, verifier, runtime and migration privileges are separate, and exercise CLI grant/revoke with the deployed role grants.
 - [ ] Review same-tenant checks for camera selection/history, atomic audit writes, PostgreSQL conflict results and immutable metadata tests.
-- [ ] Verify the migration against a populated pre-Phase-2 database and rehearse application rollback with history and audit retained. Agree on backup and retention before schema downgrade or hard deletion.
+- [ ] Review populated-upgrade and application-rollback rehearsal evidence. Confirm the packaged rollback artifact and agree on backup and retention before schema downgrade or hard deletion.
 - [ ] Confirm secret scan and API/inference compatibility on the reviewed PR head, then record named human sign-off.
+
+## Populated PostgreSQL rehearsal
+
+- PASS: `9db36ad49c74` populated upgrade to `d2f4a193b0c7`, assignment preservation at revision 0, legacy model ineligible, and schema drift check.
+- PASS: local V2 API1-only snapshot rollback with schema retained, followed by roll-forward with revision 1, selected version, history and audit intact.
+- FAIL: a database writer enabled eligibility without verified evidence and the assignment API accepted the synthetic version. P2-01 is a metadata registration case and does not cover promotion.
+- NOT TESTED: actual deployment role grants, independently authenticated verifier, packaged release rollback, and destructive schema downgrade.

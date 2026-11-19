@@ -63,3 +63,12 @@ Record an entry after every Codex work slice; never erase past test failures or 
 - Important. Validate least-privilege publisher grant/revoke and runtime permissions using actual database roles. Rehearse application rollback with the schema retained and check migration over a representative pre-existing assignment. The CI migration job runs from an empty database.
 - Rollback. Roll back application code while retaining schema and audit/history. Schema downgrades remove assignment history/revisions and potentially publisher/audit records. Backup and rehearsal are required before considering a downgrade.
 - Scope. Documentation review only. PR stays Draft and human sign-off is pending. Phase 3 remains gated.
+
+### 2026-11-19 - Final Phase 2 gate rehearsal
+
+- [Hosted run #4](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44461554789) is attached to PR head `544b3f50dc718c4c394e7632a831bf56de105ced`. Both jobs passed. Unit suite 45 passed, 2 skipped. PostgreSQL suite 2 passed. Alembic head and schema drift checks passed.
+- Populated disposable PostgreSQL 17 at `9db36ad49c74` with an organization, admin, site, camera, model version and current assignment. Upgrade to `d2f4a193b0c7` preserved the selection at revision 0 and left the legacy model ineligible. Alembic check reported no drift.
+- A synthetic database writer enabled a new version without verified evidence. The current API accepted it for assignment, confirming the blocking eligibility gap. Testing used only the disposable database.
+- Rehearsed application rollback to the local V2 API1-only snapshot while retaining the migrated schema. Health, login, camera read and camera creation worked. Roll-forward returned the same assignment at revision 1 with the history and audit records intact. This did not exercise a packaged release or a schema downgrade.
+- Privileges reviewed in code. Publisher access is separate from org admin. Runtime and migration permissions are operational configuration. There is no verified promotion mechanism or verifier role to test, and actual production role grants were not tested.
+- Recommendation remains hold for approval. PR remains Draft. No V1, deployment or Phase 3 changes.
