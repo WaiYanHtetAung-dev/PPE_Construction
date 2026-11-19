@@ -4,6 +4,7 @@ import pytest
 
 from app.db.models import ModelVersion, Organization, OrganizationMembership, PlatformPublisher
 from app.db.session import SessionLocal
+from tests.model_fixtures import seed_verified_model
 
 
 @pytest.fixture
@@ -15,13 +16,15 @@ def catalog(client, admin_account):
     with SessionLocal.begin() as db:
         foreign_org = Organization(name='Foreign organization')
         models = [
-            ModelVersion(model_key='ppe', version=str(number), inference_eligible=eligible,
+            ModelVersion(model_key='ppe', version=str(number),
                          artifact_ref='private/model.bin', artifact_sha256='a' * 64,
                          class_map={'person': 'person'})
-            for number, eligible in [(2, True), (1, True), (3, False)]
+            for number in (2, 1, 3)
         ]
         db.add_all([foreign_org, *models])
         db.flush()
+        for model in models[:2]:
+            seed_verified_model(db, model)
         path = f"/api/v1/organizations/{admin_account['org_id']}/models"
         foreign_path = f'/api/v1/organizations/{foreign_org.id}/models'
         return headers, path, foreign_path, [model.id for model in models]

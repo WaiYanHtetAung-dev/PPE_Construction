@@ -1,6 +1,6 @@
 # Phase 2 Acceptance Checklist — Model registry, versioning and camera assignment API
 
-> STATUS: P2-01 through P2-08 passed in [hosted run #4](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44461554789) on `544b3f5`. Approval is blocked by artifact eligibility enforcement; human review is pending.
+> STATUS: P2-01 through P2-08 passed in [hosted run #4](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44461554789) on `544b3f5`. The historical eligibility gap has a locally tested fix. Human review is pending.
 
 | Case | Status | Evidence / link |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ P2-01 tests metadata registration and audit. It does not test artifact retrieval
 
 ## Human-review checklist
 
-- [ ] Enforce eligibility only after verified artifact evidence is recorded. Prove an ordinary writer cannot enable an unverified version or make it available to assignment.
+- [ ] Review the fix evidence for verifier-only promotion and PostgreSQL denial of ordinary writes and unverified assignments.
 - [ ] Confirm production publisher, verifier, runtime and migration privileges are separate, and exercise CLI grant/revoke with the deployed role grants.
 - [ ] Review same-tenant checks for camera selection/history, atomic audit writes, PostgreSQL conflict results and immutable metadata tests.
 - [ ] Review populated-upgrade and application-rollback rehearsal evidence. Confirm the packaged rollback artifact and agree on backup and retention before schema downgrade or hard deletion.
@@ -117,3 +117,9 @@ P2-01 tests metadata registration and audit. It does not test artifact retrieval
 - PASS: local V2 API1-only snapshot rollback with schema retained, followed by roll-forward with revision 1, selected version, history and audit intact.
 - FAIL: a database writer enabled eligibility without verified evidence and the assignment API accepted the synthetic version. P2-01 is a metadata registration case and does not cover promotion.
 - NOT TESTED: actual deployment role grants, independently authenticated verifier, packaged release rollback, and destructive schema downgrade.
+
+## Eligibility fix security evidence
+
+- Linux unit suite: 52 passed, 3 PostgreSQL-only skipped. Signed manifest validation rejects missing files, wrong digest, tampering, untrusted signer, wrong model binding, expiry and symlinks.
+- Disposable PostgreSQL 17: 3 passed across registration, camera concurrency and `test_postgres_verified_eligibility_boundaries_and_atomicity`. Separate logins exercised runtime and publisher denial, verifier promotion, revoker access, expiry/replay denial, evidence immutability and audit rollback. The assignment API and the PostgreSQL trigger reject unverified models.
+- Alembic upgrade to `e5c19a74d620` and drift check passed. Inference deployment and the production role/mount setup were not tested. [Hosted PR checks](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1/checks).

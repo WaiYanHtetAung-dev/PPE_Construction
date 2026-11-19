@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON,
-    String, Text, UniqueConstraint, false,
+    String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -88,8 +88,34 @@ class ModelVersion(Base):
     artifact_ref: Mapped[str] = mapped_column(String(500), nullable=False)
     artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     class_map: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    inference_eligible: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ModelVerification(Base):
+    __tablename__ = 'model_verifications'
+    __table_args__ = (
+        UniqueConstraint('model_version_id', 'manifest_sha256', name='uq_verification_manifest'),
+        CheckConstraint('expires_at > verified_at', name='valid_expiry'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_version_id: Mapped[str] = mapped_column(ForeignKey('model_versions.id'), index=True)
+    artifact_ref: Mapped[str] = mapped_column(String(500))
+    artifact_sha256: Mapped[str] = mapped_column(String(64))
+    manifest_sha256: Mapped[str] = mapped_column(String(64))
+    signer_key_sha256: Mapped[str] = mapped_column(String(64))
+    verifier: Mapped[str] = mapped_column(String(255))
+    manifest_issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ModelVerificationRevocation(Base):
+    __tablename__ = 'model_verification_revocations'
+
+    verification_id: Mapped[int] = mapped_column(ForeignKey('model_verifications.id'), primary_key=True)
+    actor: Mapped[str] = mapped_column(String(255))
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class PlatformPublisher(Base):

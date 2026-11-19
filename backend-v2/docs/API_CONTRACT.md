@@ -111,8 +111,8 @@ or `revoke <user-uuid>` from a restricted operator environment. Use individually
 attributable PostgreSQL login roles that are members of `ppe_publisher_admin`.
 A DBA provisions that group and its access to read user IDs and active flags,
 read/insert/delete publisher grants and append platform audit events. The API
-runtime role needs read-only access to publisher grants, insert access to registry
-and audit rows, and SELECT on model_versions.inference_eligible for INSERT RETURNING. Keep table ownership and DDL with the migration role.
+runtime role needs read-only access to publisher grants and the eligibility view,
+and insert access to registry and audit rows. See [artifact verification](MODEL_ARTIFACT_VERIFICATION.md). Keep table ownership and DDL with the migration role.
 Use restricted deployment credentials for these roles. CLI audit records use
 the PostgreSQL login as actor.
 

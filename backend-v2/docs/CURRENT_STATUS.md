@@ -2,7 +2,7 @@
 
 **Updated** 2026-11-19
 
-**Active phase** Phase 2 — V2-P2-API1 and V2-P2-API2 implemented. Hosted CI passed. Approval is blocked by artifact eligibility enforcement.
+**Active phase** Phase 2 — V2-P2-API1 and V2-P2-API2 implemented. Verified-only eligibility fix implemented and locally verified. Human review pending.
 
 [Draft PR #1](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1) targets `main` from `feature/backend-v2-review`. Human approval is pending.
 
@@ -31,6 +31,8 @@ python -m venv .venv
 | Disposable PostgreSQL 17 rehearsal | Populated upgrade from `9db36ad49c74` to `d2f4a193b0c7` and schema drift check passed. Local V2 API1-only snapshot rollback and current-app roll-forward retained model revision, assignment, history and audit. |
 | Deployment privileges | Review only. Actual PostgreSQL role grants, verifier credentials and production rollback artifact were not tested. |
 
+| Eligibility fix | Linux Python 3.12: 52 passed, 3 PostgreSQL-only skips. Disposable PostgreSQL 17: 3 integration tests passed. Alembic head `e5c19a74d620` and drift check passed. See [PR checks](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1/checks) for hosted CI on the fix. |
+
 ## Next single task
 
-Enforce verified-only model eligibility before requesting sign-off. Registration defaults to false and supplies no promotion API. A disposable PostgreSQL check confirmed that a database writer can set the eligibility flag without an artifact-verification record. Phase 3 remains gated.
+Review the verified-only eligibility fix, its hosted CI result and the operational verifier/runtime grants. Phase 3 remains gated.

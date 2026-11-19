@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_current_user, require_org_role
 from app.api.model_catalog import CatalogModelVersion
 from app.api.schemas import FromOrm
+from app.db.model_eligibility import eligible_model_version, lock_model_eligibility
 from app.db.models import (
     AuditLog, Camera, CameraModelAssignment, CameraModelHistory, ModelVersion, Site, User, utcnow,
 )
@@ -85,8 +86,9 @@ def put_assignment(
     model_id = str(body.model_version_id) if body.model_version_id else None
     version = None
     if model_id is not None:
+        lock_model_eligibility(db, model_id)
         version = db.scalar(select(ModelVersion).where(
-            ModelVersion.id == model_id, ModelVersion.inference_eligible.is_(True),
+            ModelVersion.id == model_id, eligible_model_version(db),
         ))
         if version is None:
             raise HTTPException(404, 'Model version not found')

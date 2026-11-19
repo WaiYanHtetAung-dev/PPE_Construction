@@ -72,3 +72,10 @@ Record an entry after every Codex work slice; never erase past test failures or 
 - Rehearsed application rollback to the local V2 API1-only snapshot while retaining the migrated schema. Health, login, camera read and camera creation worked. Roll-forward returned the same assignment at revision 1 with the history and audit records intact. This did not exercise a packaged release or a schema downgrade.
 - Privileges reviewed in code. Publisher access is separate from org admin. Runtime and migration permissions are operational configuration. There is no verified promotion mechanism or verifier role to test, and actual production role grants were not tested.
 - Recommendation remains hold for approval. PR remains Draft. No V1, deployment or Phase 3 changes.
+
+### V2-P2-GATE - Verified artifact promotion security fix
+
+- Added signed Ed25519 provenance verification and streamed SHA-256 comparison under a read-only Linux release mount. The verifier uses an independent PostgreSQL identity. Revocation uses a separate role. No model loading or inference runtime was added.
+- Alembic `e5c19a74d620` removes the writable eligibility flag and adds append-only verification/revocation evidence, restricted PostgreSQL functions, a derived eligibility view and a database assignment guard. Promotion and audit are atomic. Existing selections are retained, and old flags do not convey eligibility.
+- Linux Python 3.12 suite: 52 passed, 3 skipped. Disposable PostgreSQL 17: 3 integration tests passed, including independent publisher/runtime/verifier/revoker logins, unsigned or invalid inputs, replay and revocation safety, and audit rollback. Alembic upgrade, check and current passed. Compile, architecture and contract checks passed.
+- Operational rollout still requires signer key and mount provisioning, deployment role audit and inference-side fail-closed lease plus digest enforcement. Earlier Boolean-based application versions need a schema-compatible rollback build. Human review remains pending and PR #1 stays Draft.

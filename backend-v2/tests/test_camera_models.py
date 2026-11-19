@@ -15,6 +15,7 @@ from app.db.models import (
     OrganizationMembership, Site, User,
 )
 from app.db.session import SessionLocal
+from tests.model_fixtures import seed_verified_model
 
 
 def seed_camera(db, org_id):
@@ -31,11 +32,13 @@ def seed_models(db):
     key = 'ppe-' + uuid4().hex
     versions = [
         ModelVersion(model_key=key, version=str(n), artifact_ref='private/model.bin',
-                     artifact_sha256='a' * 64, inference_eligible=n < 3)
+                     artifact_sha256='a' * 64)
         for n in range(1, 4)
     ]
     db.add_all(versions)
     db.flush()
+    for version in versions[:2]:
+        seed_verified_model(db, version)
     return [version.id for version in versions]
 
 
