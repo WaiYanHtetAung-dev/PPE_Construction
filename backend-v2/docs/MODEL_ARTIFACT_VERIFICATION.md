@@ -73,8 +73,7 @@ Operators can reassign to another verified version. The independent inference
 service must resolve eligibility through an authenticated control path, refresh
 only bounded leases, fail closed on stale or unavailable eligibility, and hash
 the exact pinned bytes before deserializing or loading them. On checksum
-mismatch it must refuse loading. The inference worker integration and deployed
-lease configuration remain operational requirements.
+mismatch it must refuse loading. The [independent inference worker](INFERENCE_SECURITY_INTEGRATION.md) implements the lease and byte checks. Production adapter, storage and lease configuration remain operational requirements.
 
 Coordinate the schema upgrade with the new application version because earlier
 Phase 2 application code expects the removed Boolean column. An application

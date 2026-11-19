@@ -2,7 +2,7 @@
 
 **Updated** 2026-11-19
 
-**Active phase** Phase 2 — V2-P2-API1 and V2-P2-API2 implemented. Verified-only eligibility fix implemented and locally verified. Human review pending.
+**Active phase** Phase 2.5 inference security integration implemented and locally verified. Human review pending.
 
 [Draft PR #1](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1) targets `main` from `feature/backend-v2-review`. Human approval is pending.
 
@@ -33,6 +33,8 @@ python -m venv .venv
 
 | Eligibility fix | Linux Python 3.12: 52 passed, 3 PostgreSQL-only skips. Disposable PostgreSQL 17: 3 integration tests passed. Alembic head `e5c19a74d620` and drift check passed. See [PR checks](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1/checks) for hosted CI on the fix. |
 
+| Phase 2.5 local | Linux: 68 passed, 4 PostgreSQL-only skips. Disposable PostgreSQL 17: 4 integration tests passed. Compose smoke: verified inference 200, revoked inference 503, schema and evidence retained after stopping services. |
+
 ## Next single task
 
-Review the verified-only eligibility fix, its hosted CI result and the operational verifier/runtime grants. Phase 3 remains gated.
+Review the Phase 2.5 inference boundary and [hosted PR checks](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1/checks). Production adapter, TLS/network, roles and mounts require operational sign-off. Phase 3 remains gated.

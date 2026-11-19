@@ -9,7 +9,7 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN = {'torch', 'ultralytics', 'cv2', 'onnxruntime', 'tensorrt', 'av', 'decord', 'gi'}
+FORBIDDEN = {'torch', 'ultralytics', 'cv2', 'onnxruntime', 'tensorrt', 'av', 'decord', 'gi', 'inference_worker'}
 
 
 def find_violations() -> list[str]:

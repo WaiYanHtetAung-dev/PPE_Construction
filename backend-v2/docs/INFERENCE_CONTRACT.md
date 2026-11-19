@@ -59,4 +59,4 @@ Inference service outputs **detections only**; person↔PPE association and temp
 
 Rules: coordinates are image-space pixels `[x1,y1,x2,y2]` within the frame dimensions; score in [0,1]; unknown classes are not silently mapped; missing supported classes may mean 'unknown', not automatically noncompliance. Add API contract version for breaking changes. A frame object key must be resolved with service credentials, never via arbitrary client URLs. Validate width/height and box bounds at the serving boundary; schema currently validates bbox order and non-negative values only.
 
-The package contains **Pydantic contract models**, not an actual AI inference server or GPU implementation. See `app/contracts/inference.py`.
+The separate [Phase 2.5 inference worker](INFERENCE_SECURITY_INTEGRATION.md) serves these Pydantic v1 payloads behind its versioned internal API. The business API imports only the contract models. Production model runtimes are independently provisioned worker adapters.

@@ -123,3 +123,10 @@ P2-01 tests metadata registration and audit. It does not test artifact retrieval
 - Linux unit suite: 52 passed, 3 PostgreSQL-only skipped. Signed manifest validation rejects missing files, wrong digest, tampering, untrusted signer, wrong model binding, expiry and symlinks.
 - Disposable PostgreSQL 17: 3 passed across registration, camera concurrency and `test_postgres_verified_eligibility_boundaries_and_atomicity`. Separate logins exercised runtime and publisher denial, verifier promotion, revoker access, expiry/replay denial, evidence immutability and audit rollback. The assignment API and the PostgreSQL trigger reject unverified models.
 - Alembic upgrade to `e5c19a74d620` and drift check passed. Inference deployment and the production role/mount setup were not tested. [Hosted PR checks](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1/checks).
+
+## Phase 2.5 inference integration evidence
+
+- PASS (Linux): valid load with the fake runtime, invalid signature, wrong SHA-256, missing artifact, wrong model identity, rejected namespace, expired lease (including while loading), confirmed revocation, authority disconnect, replay denial and separate service credentials. Replacement between hashing and loading did not change the verified snapshot passed to the loader.
+- PASS (disposable PostgreSQL 17): least-privilege authority lease issuance, denial after revocation, and business-only rollback with current assignment, revision, history and audit retained. Alembic head `e5c19a74d620` remained unchanged by rollback.
+- PASS (disposable Compose): worker and authority ran in separate containers, signed test inference returned 200, revoked test inference returned 503, and stopping the services preserved schema and evidence.
+- NOT TESTED: production adapter and model, actual deployment trust provisioning, and production drain/rollback. Production approval and human sign-off remain pending.

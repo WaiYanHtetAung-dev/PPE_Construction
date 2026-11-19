@@ -1,0 +1,66 @@
+services:
+  eligibility-authority:
+    profiles: [inference]
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    command: [uvicorn, 'inference_worker.authority:from_environment', --factory, --host, 0.0.0.0, --port, '8081', --no-access-log]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    secrets: [eligibility_token, eligibility_database_url]
+    environment:
+      ELIGIBILITY_TOKEN_FILE: /run/secrets/eligibility_token
+      ELIGIBILITY_DATABASE_URL_FILE: /run/secrets/eligibility_database_url
+      ELIGIBILITY_LEASE_SECONDS: '5'
+    networks: [default, inference_authority]
+
+  inference-worker:
+    profiles: [inference]
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    command: [uvicorn, 'inference_worker.service:from_environment', --factory, --host, 0.0.0.0, --port, '8080', --limit-concurrency, '8', --no-access-log]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on: [eligibility-authority]
+    secrets: [eligibility_token, inference_ingress_token, inference_public_key]
+    environment:
+      ELIGIBILITY_AUTHORITY_URL: http://eligibility-authority:8081
+      ELIGIBILITY_TOKEN_FILE: /run/secrets/eligibility_token
+      INFERENCE_ALLOW_LOCAL_HTTP: 'true'
+      INFERENCE_TOKEN_FILE: /run/secrets/inference_ingress_token
+      INFERENCE_SIGNER_PUBLIC_KEY: /run/secrets/inference_public_key
+      MODEL_ARTIFACT_NAMESPACE: ${INFERENCE_DEV_MODEL_NAMESPACE:-approved}
+      INFERENCE_FRAME_NAMESPACE: ${INFERENCE_DEV_FRAME_NAMESPACE:-frames}
+      INFERENCE_MODEL_ROOT: /models
+      INFERENCE_FRAME_ROOT: /frames
+      INFERENCE_MAX_MODEL_BYTES: '134217728'
+      INFERENCE_MAX_FRAME_BYTES: '8388608'
+      INFERENCE_RUNTIME_FACTORY: ${INFERENCE_DEV_RUNTIME_FACTORY:-}
+      PYTHONPATH: /srv/ppe:/runtime
+    volumes:
+      - {type: bind, source: '${INFERENCE_DEV_MODELS:-./.inference-dev/models}', target: /models, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: '${INFERENCE_DEV_FRAMES:-./.inference-dev/frames}', target: /frames, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: '${INFERENCE_DEV_RUNTIME:-./.inference-dev/runtime}', target: /runtime, read_only: true, bind: {create_host_path: false}}
+    networks: [inference_authority, inference_ingress]
+
+networks:
+  inference_authority:
+    internal: true
+  inference_ingress:
+    internal: true
+
+secrets:
+  eligibility_token:
+    file: ${INFERENCE_DEV_ELIGIBILITY_TOKEN_FILE:-./.inference-dev/eligibility.token}
+  eligibility_database_url:
+    file: ${INFERENCE_DEV_DATABASE_URL_FILE:-./.inference-dev/eligibility-db.url}
+  inference_ingress_token:
+    file: ${INFERENCE_DEV_INGRESS_TOKEN_FILE:-./.inference-dev/ingress.token}
+  inference_public_key:
+    file: ${INFERENCE_DEV_PUBLIC_KEY_FILE:-./.inference-dev/signer.pub}

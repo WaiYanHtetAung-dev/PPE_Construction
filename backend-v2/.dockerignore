@@ -1,0 +1,11 @@
+.env
+.env.*
+.inference-dev/
+.venv/
+.git/
+**/__pycache__/
+.pytest_cache/
+**/*.db
+**/*.sqlite*
+**/*.pt
+**/*.onnx
