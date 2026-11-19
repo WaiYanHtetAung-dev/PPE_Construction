@@ -55,3 +55,11 @@ Record an entry after every Codex work slice; never erase past test failures or 
 - SQLite suite returned 45 passed and 2 PostgreSQL-only skips. Disposable PostgreSQL 17 passed upgrade, drift check and 2 integration tests. Compile, architecture and contract checks passed. OpenAPI additions preserve existing operations and schemas.
 - V2 files remain untracked on feature/backend-v2-foundation. Git diff --check cannot cover untracked files. CI evidence and human review are pending.
 - Next task is the V2-P2-GATE review.
+
+### 2026-11-19 - V2-P2-GATE final review for Draft PR #1
+
+- Application commit `71b6fb5` passed [hosted run #2](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44460576958). Unit/contract/security: 45 passed, 2 skipped. PostgreSQL 17: upgrade/current at `d2f4a193b0c7`, drift check and 2 integration tests passed.
+- Blocking. Registration defaults to ineligible, while a database writer can set the flag without persisted verification. Reproduced on a disposable PostgreSQL 17 database after upgrading through head. The synthetic write was rolled back. Catalog and assignment trust this flag. Require an authenticated verifier, durable evidence bound to the immutable artifact reference and digest, restricted database roles, and a negative integration test for unverified promotion.
+- Important. Validate least-privilege publisher grant/revoke and runtime permissions using actual database roles. Rehearse application rollback with the schema retained and check migration over a representative pre-existing assignment. The CI migration job runs from an empty database.
+- Rollback. Roll back application code while retaining schema and audit/history. Schema downgrades remove assignment history/revisions and potentially publisher/audit records. Backup and rehearsal are required before considering a downgrade.
+- Scope. Documentation review only. PR stays Draft and human sign-off is pending. Phase 3 remains gated.

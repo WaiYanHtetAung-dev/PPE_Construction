@@ -6,9 +6,9 @@
 |---|---|---|---|---|
 | V2-P1-GATE | 1 | Verify PostgreSQL migrations and base CI | Unverified | Disposable PostgreSQL; CI evidence |
 | V2-P2-DESIGN | 2 | Resolve ADR-004 global vs tenant model registry | Done | Option A approved and recorded |
-| V2-P2-API1 | 2 | Add publisher grant, immutable registration and transactional platform audit | Implemented and verified locally | Human review and CI evidence pending |
-| V2-P2-API2 | 2 | Eligible catalog list/detail, then per-camera assignment GET/PUT, audit, rollback and concurrency tests | Implemented and verified locally. | Existing eligibility and tenant ownership policy |
-| V2-P2-GATE | 2 | P2-01 to P2-08 acceptance, PostgreSQL migration, CI and review | Local gate passed | Hosted CI and human review pending |
+| V2-P2-API1 | 2 | Add publisher grant, immutable registration and transactional platform audit | Implemented; local and hosted checks passed | Human review pending |
+| V2-P2-API2 | 2 | Eligible catalog list/detail, then per-camera assignment GET/PUT, audit, rollback and concurrency tests | Implemented; local and hosted checks passed | Human review pending |
+| V2-P2-GATE | 2 | P2-01 to P2-08 acceptance, PostgreSQL migration, CI and review | Hosted CI passed; approval blocked | Enforce verified-only artifact eligibility and obtain human review |
 | V2-P3 | 3 | Authenticated idempotent incident ingestion, state machine and outbox | Planned | Approved Phase 3 ADR, Phase 2 contract gate |
 | V2-P4 | 4 | Media gateway / stream lifecycle / bounded inference bridge | Planned | Approved trust boundary + topology |
 | V2-P5 | 5 | Evidence, durable jobs, realtime notifications, reports | Planned | Storage privacy/retention decisions |

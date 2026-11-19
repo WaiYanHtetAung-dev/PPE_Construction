@@ -1,6 +1,6 @@
 # Phase 2 Acceptance Checklist — Model registry, versioning and camera assignment API
 
-> STATUS: Local acceptance passed. Hosted CI and human review pending.
+> STATUS: P2-01 through P2-08 passed in [hosted run #2](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/44460576958) on `71b6fb5`. Approval is blocked by artifact eligibility enforcement; human review is pending.
 
 | Case | Status | Evidence / link |
 | --- | --- | --- |
@@ -92,4 +92,21 @@ The SQLite tests in `tests/test_model_catalog.py` passed. They cover eligibility
 | P2-07 | Passed (SQLite) | Switching back appends history. `test_assignment_rolls_back_on_audit_failure` verifies transaction rollback. |
 | P2-08 | Passed (PostgreSQL 17) | `test_postgres_concurrent_assignments_and_append_only_history` checks first and existing assignment races and direct history mutation rejection. |
 
-All tests above are in `tests/test_camera_models.py`. Phase closure still requires CI evidence and review.
+All tests above are in `tests/test_camera_models.py`. Phase closure requires resolution of the eligibility blocker and human sign-off.
+
+## Hosted CI evidence
+
+| Criteria | Hosted job and scope |
+| --- | --- |
+| P2-01 to P2-07 | unit-contract-security, SQLite API/contract suite, 45 passed and 2 PostgreSQL-only skips |
+| P2-03 and P2-08 | postgres-migration, PostgreSQL 17 duplicate and camera update races, 2 passed. Also checks immutable model fields and append-only history. |
+
+P2-01 tests metadata registration and audit. It does not test artifact retrieval, verification or eligibility promotion. P2-04 covers application authorization and grant logic. PostgreSQL role provisioning was not exercised end to end. P2-06 retrieval and the P2-07 rollback flow were tested over HTTP with SQLite.
+
+## Human-review checklist
+
+- [ ] Enforce eligibility only after verified artifact evidence is recorded. Prove an ordinary writer cannot enable an unverified version or make it available to assignment.
+- [ ] Confirm production publisher, verifier, runtime and migration privileges are separate, and exercise CLI grant/revoke with the deployed role grants.
+- [ ] Review same-tenant checks for camera selection/history, atomic audit writes, PostgreSQL conflict results and immutable metadata tests.
+- [ ] Verify the migration against a populated pre-Phase-2 database and rehearse application rollback with history and audit retained. Agree on backup and retention before schema downgrade or hard deletion.
+- [ ] Confirm secret scan and API/inference compatibility on the reviewed PR head, then record named human sign-off.
