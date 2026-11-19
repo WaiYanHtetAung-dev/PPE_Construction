@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "request_id": "52969a50-f8f3-48c1-8b57-15017c3e57aa",
+  "frame_id": "cam-1:frame-1",
+  "model_key": "ppe-yolo",
+  "model_version": "1.0.0",
+  "inference_ms": 25.4,
+  "detections": [
+    {
+      "class_key": "person",
+      "original_class": "person",
+      "score": 0.97,
+      "bbox_xyxy": [
+        105,
+        50,
+        420,
+        700
+      ],
+      "attributes": {}
+    },
+    {
+      "class_key": "helmet",
+      "original_class": "yellow helmet",
+      "score": 0.93,
+      "bbox_xyxy": [
+        188,
+        47,
+        246,
+        126
+      ],
+      "attributes": {
+        "color": "yellow"
+      }
+    },
+    {
+      "class_key": "vest",
+      "original_class": "vest",
+      "score": 0.9,
+      "bbox_xyxy": [
+        156,
+        220,
+        365,
+        440
+      ],
+      "attributes": {}
+    }
+  ]
+}

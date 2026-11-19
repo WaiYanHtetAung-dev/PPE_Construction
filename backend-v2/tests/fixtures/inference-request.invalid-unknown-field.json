@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "request_id": "52969a50-f8f3-48c1-8b57-15017c3e57aa",
+  "frame_id": "cam-1:frame-1",
+  "model_key": "ppe-yolo",
+  "model_version": "1.0.0",
+  "frame": {
+    "object_key": "frames/test/cam-1/00001.jpg",
+    "width": 1280,
+    "height": 720,
+    "content_type": "image/jpeg",
+    "credential": "bad"
+  },
+  "options": {
+    "confidence_threshold": 0.35
+  }
+}

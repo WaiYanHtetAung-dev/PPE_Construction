@@ -1,0 +1,3 @@
+Resume the PPE Construction V2 repository carefully. Do not assume you remember prior chats. Read AGENTS.md, agent.md, docs/CURRENT_STATUS.md, docs/TASK_BACKLOG.md, docs/DEV_LOG.md, docs/PHASE_ROADMAP.md, docs/DECISIONS.md, docs/ARCHITECTURE.md, current docs/phases/NN-*.md and matching acceptance test spec. Inspect git status, diff and relevant actual source before proposing work.
+
+First show: (1) current branch and uncommitted edits; (2) actual implemented vs planned state; (3) most recent exact verified tests; (4) blockers/open ADRs; (5) next one small task. Do not modify code before presenting this snapshot. Ask for approval only when a blocking decision exists.
