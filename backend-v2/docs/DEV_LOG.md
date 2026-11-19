@@ -94,3 +94,10 @@ Record an entry after every Codex work slice; never erase past test failures or 
 - Local Linux: CPU adapter/security 10 passed, full suite 78 passed and 4 PostgreSQL-only skips. PostgreSQL 17: 4 passed, upgrade/check passed. Compile, architecture, contract, Compose config and opt-in CPU image build passed. Hosted evidence is available in the PR checks.
 - Synthetic CPU-only baseline: Linux Python 3.12 on Intel Core i5-1145G7, ONNX 1.23.2, ORT 1.32.0, one worker thread, 403522-byte constant graph, 5 requests. Median signature/hash verification 0.796 ms, graph validation + session creation 0.982 ms, decode/inference/postprocess 7.280 ms. Process peak RSS 187108 KiB. This is not Finalboss or production capacity evidence.
 - Finalboss real inference, V1 detection parity and actual CPU latency/memory remain not tested. PR #1 remains Draft. No V1, deployment, or Phase 3 changes.
+
+### 2026-11-19 - Phase 2.6-B offline comparison workflow
+
+- Reconfirmed Finalboss source SHA-256 `89e96c1da3c6a413a2d4d5d7ad1a06f485355a5096ea155e3b6d260ed9d3b7dd`. No approved exporter images, wheel locks, rights clearance or real corpus were supplied. Neither exporter was run and no checkpoint was deserialized. No exporter selected.
+- Added separate 8.4.102 and 8.4.96 approved-profile configuration, locked local image preflight, offline V1 default-rect/fixed-square captures, approved corpus manifest and a comparison path that binds the signed worker results to live authority evidence for the exact candidate digest.
+- Local Linux full regression during development: 83 passed, 4 skipped; targeted harness/ONNX: 15 passed. Architecture and published contract checks passed. The final suite also covers independent synthetic graph review and is exercised in hosted PR checks. These are synthetic results only.
+- No worker, FastAPI, V1 or schema changes. Rights, actual export, parity, human review and deployment remain separate gates. See PHASE_2_6_OFFLINE_WORKFLOW.md.

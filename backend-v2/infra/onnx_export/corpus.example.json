@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "approval": "REPLACE-WITH-CORPUS-APPROVAL",
+  "de_identified": true,
+  "samples": [
+    {"id":"square-empty","file":"square-empty.png","sha256":"0000000000000000000000000000000000000000000000000000000000000000","usage_authorization":"REPLACE-WITH-FIXTURE-APPROVAL","width":640,"height":640,"aspect_ratio":"1:1","purpose":"empty"},
+    {"id":"wide-people","file":"wide-people.png","sha256":"0000000000000000000000000000000000000000000000000000000000000000","usage_authorization":"REPLACE-WITH-FIXTURE-APPROVAL","width":1280,"height":720,"aspect_ratio":"16:9","purpose":"multiple_people"},
+    {"id":"wide-overlap","file":"wide-overlap.png","sha256":"0000000000000000000000000000000000000000000000000000000000000000","usage_authorization":"REPLACE-WITH-FIXTURE-APPROVAL","width":1280,"height":720,"aspect_ratio":"16:9","purpose":"overlapping_ppe"}
+  ]
+}

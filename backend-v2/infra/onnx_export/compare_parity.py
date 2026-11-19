@@ -15,8 +15,7 @@ def iou(a, b):
     return intersection / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - intersection)
 
 
-def load(path):
-    data = json.loads(path.read_text(encoding='utf-8'))
+def validate_detections(data):
     if not isinstance(data, dict) or not data:
         raise ValueError('Expected a nonempty sample ID mapping')
     for rows in data.values():
@@ -64,12 +63,55 @@ def compare(reference, candidate):
     return {'passed': not any(row['failures'] for row in records.values()), 'samples': records}
 
 
+def compare_capture(reference, candidate, expected_mode):
+    if (reference.get('mode') != expected_mode or candidate.get('mode') != 'verified-worker'
+            or not reference.get('corpus_sha256')
+            or reference['corpus_sha256'] != candidate.get('corpus_sha256')
+            or reference.get('samples') != candidate.get('samples')):
+        raise ValueError('Capture modes, corpus digest or declared samples differ')
+    expected, actual = map(validate_detections, (reference['detections'], candidate['detections']))
+    samples = reference['samples']
+    if set(samples) != set(expected):
+        raise ValueError('Capture sample list differs from detections')
+    result = compare(expected, actual)
+    for key, sample in samples.items():
+        record = result['samples'][key]
+        record.update(sample)
+        record['v1_count'], record['onnx_count'] = len(expected[key]), len(actual[key])
+        if sample['purpose'] == 'empty' and (expected[key] or actual[key]):
+            record['failures'].append('Declared empty fixture produced detections')
+        if sample['purpose'] == 'multiple_people':
+            for side, rows in (('V1', expected[key]), ('ONNX', actual[key])):
+                if sum(item['class_id'] == 3 for item in rows) < 2:
+                    record['failures'].append(f'{side} did not detect multiple people')
+    result['passed'] = not any(row['failures'] for row in result['samples'].values())
+    result['predictor_options'] = reference['predictor_options']
+    return result
+
+
+def load(path):
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('v1', type=Path)
     parser.add_argument('onnx', type=Path)
+    parser.add_argument('--fixed-square', type=Path)
     args = parser.parse_args()
-    result = compare(load(args.v1), load(args.onnx))
+    legacy, candidate = load(args.v1), load(args.onnx)
+    if args.fixed_square:
+        comparisons = {
+            'v1-default': compare_capture(legacy, candidate, 'v1-default'),
+            'fixed-square': compare_capture(load(args.fixed_square), candidate, 'fixed-square'),
+        }
+        result = {'passed': all(item['passed'] for item in comparisons.values()),
+                  'artifact_sha256': candidate['artifact_sha256'],
+                  'corpus_sha256': candidate['corpus_sha256'], 'comparisons': comparisons}
+    else:
+        if 'detections' in legacy or 'detections' in candidate:
+            parser.error('Capture reports require both V1 modes via --fixed-square')
+        result = compare(validate_detections(legacy), validate_detections(candidate))
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result['passed'] else 1)
 

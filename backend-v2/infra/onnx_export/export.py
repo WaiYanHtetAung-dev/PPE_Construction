@@ -17,9 +17,11 @@ def digest(path):
 
 
 def main():
-    source_hash, approval, image = sys.argv[1:]
-    if version('ultralytics') != '8.4.102':
-        raise RuntimeError('Exporter must match reviewed checkpoint toolchain candidate')
+    source_hash, approval, image, expected_version, lock, mode = sys.argv[1:]
+    if expected_version not in ('8.4.102', '8.4.96') or version('ultralytics') != expected_version:
+        raise RuntimeError('Exporter must match the approved toolchain profile')
+    if digest(Path('/build/requirements.lock')) != lock:
+        raise RuntimeError('Exporter wheel lock does not match the approved digest')
     source, local = Path('/input/finalboss.pt'), Path('/tmp/finalboss.pt')
     shutil.copyfile(source, local)
     if digest(local) != source_hash:
@@ -31,6 +33,18 @@ def main():
     model = YOLO(str(local), task='detect')
     if model.task != 'detect' or [model.names[i] for i in sorted(model.names)] != LABELS or set(model.names) != set(range(8)):
         raise RuntimeError('Checkpoint task or labels incompatible')
+    if mode == 'reference':
+        if expected_version != '8.4.96':
+            raise RuntimeError('Reference must use the V1-pinned toolchain')
+        from reference import capture
+        capture(model, Path('/output'))
+        with Path('/output/reference-toolchain.json').open('x', encoding='utf-8') as stream:
+            json.dump({'approval': approval, 'image': image, 'lock_sha256': lock,
+                       'source_sha256': source_hash, 'ultralytics': expected_version,
+                       'torch': version('torch'), 'opencv': __import__('cv2').__version__}, stream, indent=2)
+        return
+    if mode != 'export':
+        raise RuntimeError('Unsupported offline mode')
     options = dict(format='onnx', opset=17, imgsz=640, batch=1, dynamic=False,
                    half=False, simplify=False, nms=False, device='cpu')
     output = Path(model.export(**options))
@@ -49,6 +63,7 @@ def main():
         stream.write(graph.SerializeToString())
     record = {
         'approval': approval, 'exporter_image': image, 'source_sha256': source_hash,
+        'lock_sha256': lock,
         'artifact_sha256': digest(target), 'artifact_bytes': target.stat().st_size,
         'versions': {name: version(name) for name in ('ultralytics', 'torch', 'onnx')},
         'metadata': {'task': model.task, 'labels': LABELS},

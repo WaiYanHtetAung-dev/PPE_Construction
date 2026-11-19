@@ -2,7 +2,7 @@
 
 **Updated** 2026-11-19
 
-**Active phase** Phase 2.6 CPU ONNX adapter implemented. Finalboss export and V1 parity remain blocked.
+**Active phase** Phase 2.6-B offline workflow and parity harness implemented. Real export and parity remain blocked.
 
 [Draft PR #1](https://github.com/WaiYanHtetAung-dev/PPE_Construction/pull/1) targets `main` from `feature/backend-v2-review`. Human approval is pending.
 
@@ -37,6 +37,17 @@ python -m venv .venv
 
 | Phase 2.6 local | Actual CPUExecutionProvider ran synthetic ONNX: 10 adapter/security tests passed. Full Linux suite 78 passed, 4 skipped. Disposable PostgreSQL 17 integration: 4 passed. CPU worker image and Compose configuration passed. |
 
+## Phase 2.6-B release status
+
+| Gate | Status |
+|---|---|
+| Implementation | Complete. Dual-profile offline runner, corpus verification, two-mode V1 reference and signed-worker parity capture. |
+| Export compatibility | NOT TESTED for 8.4.102 or 8.4.96. Approved digests, wheel locks and execution clearance unavailable. |
+| Real-model parity | NOT TESTED. No approved candidate or de-identified corpus. |
+| Licensing | Written clearance pending. |
+| Human review | Pending. Draft PR #1 remains open. |
+| Production deployment | No approval or deployment. |
+
 ## Next single task
 
-Obtain the approved offline exporter image and wheel lock, confirm Finalboss and fixture rights, and supply the approved de-identified corpus. Then run export and V1 parity under the Phase 2.6 acceptance plan. Human review and production rollout remain gated.
+Provision both approved toolchain images and lock digests on the disposable offline host, with signed-off checkpoint rights and corpus. Run the 8.4.102 and 8.4.96 exports and compare before selecting a toolchain. [Offline workflow](PHASE_2_6_OFFLINE_WORKFLOW.md)

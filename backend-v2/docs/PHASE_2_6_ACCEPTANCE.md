@@ -24,11 +24,10 @@ compatibility check.
 docker build --pull=false --network=none --build-arg EXPORT_BASE=<approved-base@sha256:digest> \
   -f infra/onnx_export/Dockerfile -t <local-exporter-tag> <approved-wheelhouse-directory>
 python infra/onnx_export/run_offline.py <path-to-original-finalboss.pt> <new-external-output> \
-  --image <approved-exporter@sha256:digest> --approval <approved-record-id>
+  --toolchains <approved-external-toolchains.json> --version 8.4.102
 ```
 
-Make the reviewed image available under the supplied immutable digest before
-running the launcher. The sandbox receives only the read-only checkpoint and
+The dual-version toolchain configuration and runner commands are in [Phase 2.6-B](PHASE_2_6_OFFLINE_WORKFLOW.md). Preload the approved immutable digests before running. The sandbox receives only the read-only checkpoint and
 conversion script, a private scratch filesystem and a new output directory.
 No GPU, network, production secrets or release signer enter the sandbox.
 Treat its outputs as untrusted candidates. Validate profile, digest and parity
