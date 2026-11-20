@@ -32,6 +32,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      proxy: { "/api": { target: "http://ppe-v2-int-api:8000", changeOrigin: true } },
       host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",
       port: parseInt(process.env.PORT || "8443"),
       strictPort: true,
