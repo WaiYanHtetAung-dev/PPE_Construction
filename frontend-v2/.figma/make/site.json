@@ -1,0 +1,10 @@
+{
+  "description": "Monitor construction site PPE compliance with live CCTV, incident tracking, camera and model management, and safety reports for teams seeking faster oversight.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
