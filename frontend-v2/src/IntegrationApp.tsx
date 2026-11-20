@@ -1,3 +1,7 @@
+import RealIncidentTable from "./RealIncidentTable";
+import RealCameraTable from "./RealCameraTable";
+import RealMetrics from "./RealMetrics";
+import FigmaShell from "./FigmaShell";
 
 import { useState, type FormEvent } from "react";
 
@@ -250,7 +254,7 @@ export default function IntegrationApp() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-5 md:p-10">
+    <FigmaShell userEmail={user.email} onLogout={() => void logout()}>
       <div className="mx-auto max-w-6xl">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -262,12 +266,6 @@ export default function IntegrationApp() {
             </p>
           </div>
 
-          <button
-            onClick={logout}
-            className="rounded-lg bg-slate-900 px-5 py-3 text-white"
-          >
-            Sign out
-          </button>
         </header>
 
         <div className="my-7 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
@@ -316,82 +314,23 @@ export default function IntegrationApp() {
           </p>
         )}
 
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            ["Registered Sites", sites.length],
-            ["Configured Cameras", cameras.length],
-            ["Total Incidents", incidents?.total ?? "—"],
-          ].map(([label, value]) => (
-            <section
-              key={label}
-              className="rounded-xl bg-white p-6 shadow-sm"
-            >
-              <p className="text-sm text-slate-500">{label}</p>
-              <strong className="mt-2 block text-3xl">
-                {value}
-              </strong>
-            </section>
-          ))}
-        </div>
+        <RealMetrics
+          siteCount={sites.length}
+          cameraCount={cameras.length}
+          incidentTotal={incidents?.total ?? null}
+        />
 
-        <section className="mt-6 rounded-xl bg-white p-6">
-          <h2 className="mb-4 text-lg font-bold">
-            Sites and Cameras
-          </h2>
+        <RealCameraTable
+          sites={sites}
+          cameras={cameras}
+        />
 
-          {cameras.length === 0 && (
-            <p>No cameras returned by the API.</p>
-          )}
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="p-3">Camera</th>
-                  <th className="p-3">Site</th>
-                  <th className="p-3">Configured</th>
-                  <th className="p-3">Stream reference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cameras.map((camera) => (
-                  <tr key={camera.id} className="border-b">
-                    <td className="p-3">{camera.name}</td>
-                    <td className="p-3">
-                      {sites.find((s) => s.id === camera.site_id)?.name ?? "Unknown"}
-                    </td>
-                    <td className="p-3">
-                      {camera.enabled ? "Enabled" : "Disabled"}
-                    </td>
-                    <td className="p-3">{camera.stream_ref}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-xl bg-white p-6">
-          <h2 className="mb-4 text-lg font-bold">
-            Incidents
-          </h2>
-          <p className="mb-3 text-sm text-slate-500">
-            Showing {incidents?.items.length ?? 0} of{" "}
-            {incidents?.total ?? "—"} incidents
-          </p>
-          {incidents?.items.length === 0 && (
-            <p>No incidents recorded in this test organization.</p>
-          )}
-          {incidents?.items.map((incident) => (
-            <div key={incident.id} className="border-t py-3 text-sm">
-              {incident.violation_type} — {incident.status}
-              <span className="ml-3 text-slate-500">
-                {incident.detected_at}
-              </span>
-            </div>
-          ))}
-        </section>
+        <RealIncidentTable
+          incidents={incidents}
+          sites={sites}
+          cameras={cameras}
+        />
       </div>
-    </main>
+    </FigmaShell>
   );
 }
