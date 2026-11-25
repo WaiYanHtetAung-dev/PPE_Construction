@@ -170,6 +170,71 @@ jobs:
             ppe-backend-runtime:${{ github.sha }} \
             -c 'import fastapi, sqlalchemy, psycopg, cryptography; print("PASS: Python imports")'
 
+      
+      - name: Smoke test FastAPI runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          container="ppe-runtime-smoke-${{ github.run_id }}"
+
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d \
+            --name "$container" \
+            --publish 127.0.0.1:18081:8000 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --memory 512m \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --env APP_ENV=ci \
+            --env DATABASE_URL=postgresql+psycopg://smoke:smoke@127.0.0.1:5432/smoke \
+            ppe-backend-runtime:${{ github.sha }}
+
+          echo "=== WAIT FOR FASTAPI ==="
+          ready=0
+          for i in $(seq 1 30); do
+            if curl --fail --silent --max-time 2 \
+              http://127.0.0.1:18081/health/live \
+              | grep -q '"status":"ok"'; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo "FAIL: FastAPI did not become live"
+            docker logs --tail 50 "$container"
+            exit 1
+          fi
+          echo "PASS: LIVENESS HTTP 200"
+
+          echo "=== AUTHENTICATION BOUNDARY ==="
+          status=$(curl --silent --output /dev/null \
+            --write-out '%{http_code}' \
+            --max-time 5 \
+            http://127.0.0.1:18081/api/v1/auth/me)
+
+          test "$status" = "401"
+          echo "PASS: UNAUTHENTICATED HTTP 401"
+
+          echo "=== DATABASE READINESS ==="
+          status=$(curl --silent --output /dev/null \
+            --write-out '%{http_code}' \
+            --max-time 5 \
+            http://127.0.0.1:18081/health/ready)
+
+          test "$status" = "503"
+          echo "PASS: MISSING DATABASE RETURNS HTTP 503"
+
+          echo "PASS: FASTAPI RUNTIME SMOKE TEST"
+     
       - name: Scan runtime candidate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
