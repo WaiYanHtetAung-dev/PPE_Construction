@@ -246,3 +246,134 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '0'
           hide-progress: true
+
+  backend-postgres-integration:
+    name: Backend PostgreSQL Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build candidate image
+        run: |
+          docker build \
+            -f backend-v2/Dockerfile.runtime-candidate \
+            -t ppe-backend-pgci:${{ github.sha }} \
+            backend-v2
+
+      - name: Test PostgreSQL migration and FastAPI readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          network="ppe-pgci-${{ github.run_id }}"
+          db="ppe-pgci-db"
+          api="ppe-pgci-api"
+
+          cleanup() {
+            docker rm -f "$api" "$db" >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker network create "$network"
+
+          docker run -d \
+            --name "$db" \
+            --network "$network" \
+            --env POSTGRES_USER=ppe_ci \
+            --env POSTGRES_PASSWORD=ci_only_test_password \
+            --env POSTGRES_DB=ppe_ci \
+            postgres:17
+
+          echo "=== WAIT FOR POSTGRESQL ==="
+          db_ready=0
+          for i in $(seq 1 40); do
+            if docker exec "$db" \
+              pg_isready -U ppe_ci -d ppe_ci \
+              >/dev/null 2>&1; then
+              db_ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$db_ready" -eq 1
+
+          db_url="postgresql+psycopg://ppe_ci:ci_only_test_password@ppe-pgci-db:5432/ppe_ci"
+          image="ppe-backend-pgci:${{ github.sha }}"
+
+          echo "=== ALEMBIC MIGRATION ==="
+          docker run --rm \
+            --network "$network" \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --env DATABASE_URL="$db_url" \
+            --entrypoint python \
+            "$image" \
+            -m alembic -c alembic.ini upgrade head
+
+          echo "=== CHECK MIGRATION REVISION ==="
+          docker run --rm \
+            --network "$network" \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --env DATABASE_URL="$db_url" \
+            --entrypoint python \
+            "$image" \
+            -m alembic -c alembic.ini current --check-heads
+
+          echo "=== START FASTAPI ==="
+          docker run -d \
+            --name "$api" \
+            --network "$network" \
+            --publish 127.0.0.1:18082:8000 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --memory 512m \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --env APP_ENV=ci \
+            --env DATABASE_URL="$db_url" \
+            "$image"
+
+          echo "=== CHECK READINESS ==="
+          api_ready=0
+          for i in $(seq 1 30); do
+            status=$(curl -sS -o /dev/null \
+              -w '%{http_code}' --max-time 2 \
+              http://127.0.0.1:18082/health/ready \
+              2>/dev/null || true)
+
+            if [ "$status" = "200" ]; then
+              api_ready=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$api_ready" -ne 1 ]; then
+            echo "FAIL: Database readiness"
+            docker logs --tail 30 "$api"
+            exit 1
+          fi
+
+          echo "PASS: DATABASE READINESS HTTP 200"
+
+          echo "=== CHECK AUTH BOUNDARY ==="
+          status=$(curl -sS -o /dev/null \
+            -w '%{http_code}' --max-time 5 \
+            http://127.0.0.1:18082/api/v1/auth/me)
+
+          test "$status" = "401"
+          echo "PASS: UNAUTHENTICATED HTTP 401"
+
+          echo "PASS: POSTGRESQL INTEGRATION"
