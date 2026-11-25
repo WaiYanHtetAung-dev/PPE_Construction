@@ -1,0 +1,62 @@
+
+name: PPE Frontend V2 CI
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "fix/**"
+      - main
+    paths:
+      - "frontend-v2/**"
+      - ".github/workflows/frontend-v2-ci.yml"
+
+  pull_request:
+    paths:
+      - "frontend-v2/**"
+      - ".github/workflows/frontend-v2-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-ci:
+    name: TypeScript and Production Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend-v2
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend-v2/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: TypeScript validation
+        run: pnpm exec tsc --noEmit --project tsconfig.json
+
+      - name: Vite production build
+        run: pnpm run build
+
+      - name: Verify generated output
+        run: test -f dist/index.html
+
+      - name: CI completed
+        run: echo "PASS - Frontend V2 CI"
