@@ -101,3 +101,28 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '0'
           hide-progress: true
+      
+      - name: Gate backend Python library vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ppe-backend-ci:${{ github.sha }}
+          format: table
+          scanners: vuln
+          vuln-type: library
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          hide-progress: true
+
+      - name: Gate backend critical OS vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ppe-backend-ci:${{ github.sha }}
+          format: table
+          scanners: vuln
+          vuln-type: os
+          severity: CRITICAL
+          exit-code: '1'
+          hide-progress: true
+
