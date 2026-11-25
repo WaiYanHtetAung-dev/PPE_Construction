@@ -64,6 +64,7 @@ jobs:
           exit-code: '0'
           hide-progress: true
 
+
   backend-image:
     name: Backend Docker Build
     runs-on: ubuntu-latest
@@ -126,3 +127,57 @@ jobs:
           exit-code: '1'
           hide-progress: true
 
+
+  backend-runtime-candidate:
+    name: Backend Runtime Candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build runtime candidate
+        run: |
+          docker build \
+            --file backend-v2/Dockerfile.runtime-candidate \
+            --tag ppe-backend-runtime:${{ github.sha }} \
+            backend-v2
+
+      - name: Verify non-root runtime
+        run: |
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --entrypoint /usr/bin/id \
+            ppe-backend-runtime:${{ github.sha }} \
+            -u | grep -qx 65532
+
+      - name: Verify Python dependencies
+        run: |
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --entrypoint python \
+            ppe-backend-runtime:${{ github.sha }} \
+            -c 'import fastapi, sqlalchemy, psycopg, cryptography; print("PASS: Python imports")'
+
+      - name: Scan runtime candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ppe-backend-runtime:${{ github.sha }}
+          format: table
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+          hide-progress: true
