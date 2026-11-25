@@ -1,0 +1,79 @@
+
+name: PPE V2 Docker Build CI
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "fix/**"
+      - main
+    paths:
+      - "frontend-v2/**"
+      - "backend-v2/**"
+      - ".github/workflows/docker-build-ci.yml"
+
+  pull_request:
+    paths:
+      - "frontend-v2/**"
+      - "backend-v2/**"
+      - ".github/workflows/docker-build-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-image:
+    name: Frontend Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            --file frontend-v2/Dockerfile.ci \
+            --tag ppe-frontend-ci:${{ github.sha }} \
+            frontend-v2
+
+      - name: Verify static files in image
+        run: |
+          docker run --rm \
+            --network none \
+            --entrypoint /bin/sh \
+            ppe-frontend-ci:${{ github.sha }} \
+            -c 'test -f /usr/share/nginx/html/index.html'
+
+  backend-image:
+    name: Backend Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build backend image
+        run: |
+          docker build \
+            --file backend-v2/Dockerfile.ci \
+            --tag ppe-backend-ci:${{ github.sha }} \
+            backend-v2
+
+      - name: Verify Python image
+        run: |
+          docker run --rm \
+            --network none \
+            --entrypoint python \
+            ppe-backend-ci:${{ github.sha }} \
+            --version
