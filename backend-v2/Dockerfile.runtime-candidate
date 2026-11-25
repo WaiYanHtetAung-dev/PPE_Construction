@@ -1,0 +1,38 @@
+
+# Experimental PPE Backend Runtime Candidate
+# CI testing only - do not deploy
+
+FROM python:3.12-slim-trixie AS builder
+
+WORKDIR /build
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+COPY requirements.txt ./
+
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install \
+       --no-cache-dir \
+       -r requirements.txt
+
+# Runtime stage
+FROM python:3.12-slim-trixie AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}"
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+
+COPY --chown=65532:65532 . /app
+
+RUN python -m compileall -q /app/app
+
+USER 65532:65532
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", "--port", "8000"]
