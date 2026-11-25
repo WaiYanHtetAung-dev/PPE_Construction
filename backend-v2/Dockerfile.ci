@@ -1,6 +1,6 @@
 
 # Backend CI image - build validation only
-FROM python:3.12-slim-bookworm-bookworm
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
