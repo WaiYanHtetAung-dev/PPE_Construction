@@ -10,6 +10,11 @@ import siteConfiguration from "./.figma/make/site.json";
 export default defineConfig(({ mode }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === "development";
+  const apiOrigin = process.env.PPE_API_ORIGIN;
+  const host = process.env.FIGMA_DEV_SERVER_HOST || (apiOrigin ? "127.0.0.1" : "0.0.0.0");
+  const apiProxy = (target: string) => ({
+    "^/api(?:/|$)": { target, changeOrigin: true },
+  });
 
   return {
     base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : "/",
@@ -32,8 +37,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      proxy: { "/api": { target: "http://ppe-v2-int-api:8000", changeOrigin: true } },
-      host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",
+      proxy: apiProxy(apiOrigin || "http://ppe-v2-int-api:8000"),
+      host,
       port: parseInt(process.env.PORT || "8443"),
       strictPort: true,
       watch: {
@@ -41,7 +46,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: {
-      host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",
+      proxy: apiOrigin ? apiProxy(apiOrigin) : {},
+      host,
       port: parseInt(process.env.PORT || "8443"),
     },
   };

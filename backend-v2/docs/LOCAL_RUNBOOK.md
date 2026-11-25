@@ -1,5 +1,50 @@
 # Backend V2 Local Runbook (Windows PowerShell)
 
+## Same-origin browser smoke (Task 1)
+
+Run from the workspace root on D: with Node 22.12+ (or Node 24), pnpm 9.15.9
+and Python 3.12 available. The smoke runner starts a loopback-only Vite preview
+of `dist` and a separate loopback-only FastAPI server, both on OS-assigned ports.
+Vite forwards `/api` to `PPE_API_ORIGIN`, preserving `/api/v1` paths. The runner
+sets this variable itself and reuses the existing pytest SQLite fixture and
+synthetic account. Docker, PostgreSQL, `.env` setup and model files are unnecessary.
+
+```powershell
+New-Item -ItemType Directory -Force .venv\smoke-tmp | Out-Null
+$env:TEMP = (Resolve-Path .venv\smoke-tmp).Path
+$env:TMP = $env:TEMP
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Resolve-Path .venv).Path 'smoke-browsers'
+$env:PIP_CACHE_DIR = Join-Path (Resolve-Path .venv).Path 'pip-cache'
+python -m venv .venv\browser-smoke
+$smokePython = (Resolve-Path .venv\browser-smoke\Scripts\python.exe).Path
+& $smokePython -m pip install -r backend-v2\requirements-browser-smoke.txt
+& $smokePython -m playwright install chromium
+Push-Location frontend-v2
+pnpm install --frozen-lockfile --ignore-scripts --store-dir ..\.venv\pnpm-store
+pnpm exec tsc --noEmit --project tsconfig.json
+pnpm run build
+Pop-Location
+Push-Location backend-v2
+& $smokePython -m pytest -q tests/browser_smoke.py
+Pop-Location
+```
+
+In GitHub Actions, `.github/workflows/frontend-v2-ci.yml` runs the existing
+frontend checks first. The browser steps run from `backend-v2` on Ubuntu:
+
+```sh
+python -m pip install -r requirements-browser-smoke.txt
+python -m playwright install --with-deps chromium
+python -m pytest -q tests/browser_smoke.py
+```
+
+For manual local integration with a separate disposable backend, start Vite dev
+or preview with `PPE_API_ORIGIN` set to the backend origin (for example,
+`http://127.0.0.1:8000`). Bind the frontend to loopback with `--host 127.0.0.1`.
+The Vite preview proxy is for integration tests. Any deployment proxy must
+serve the UI and forward `/api/v1` on the same HTTPS origin. The static Nginx
+CI image remains a build artifact.
+
 ## Start development
 
 ```powershell
