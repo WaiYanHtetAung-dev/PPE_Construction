@@ -1,5 +1,6 @@
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from threading import Barrier
 from uuid import UUID, uuid4
 
@@ -11,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.api.camera_models import AssignmentInput, put_assignment
 from app.db.models import (
-    AuditLog, Camera, CameraModelAssignment, CameraModelHistory, ModelVersion, Organization,
-    OrganizationMembership, Site, User,
+    AuditLog, Camera, CameraModelAssignment, CameraModelHistory, ModelVerification,
+    ModelVerificationRevocation, ModelVersion, Organization, OrganizationMembership, Site, User,
+    utcnow,
 )
 from app.db.session import SessionLocal
 from tests.model_fixtures import seed_verified_model
@@ -87,6 +89,83 @@ def test_assignment_switch_rollback_unassign_and_history(client, assignment):
     assert client.get(path + '/history?before_revision=3&limit=1', headers=headers).json()[0]['revision'] == 2
     with SessionLocal() as db:
         assert db.scalar(select(func.count()).select_from(AuditLog)) == 5
+
+
+def test_switching_one_of_three_camera_assignments_preserves_other_cameras(
+    client, assignment, admin_account,
+):
+    headers, _, foreign_path, (model_a, model_b, _) = assignment
+    prefix = f"/api/v1/organizations/{admin_account['org_id']}"
+    paths = []
+    for index in range(1, 4):
+        site = client.post(f'{prefix}/sites', headers=headers, json={'name': f'Synthetic Site {index}'})
+        assert site.status_code == 201
+        site_id = site.json()['id']
+        camera = client.post(f'{prefix}/sites/{site_id}/cameras', headers=headers, json={
+            'name': f'Synthetic Camera {index}', 'stream_ref': f'stream:test/camera-{index}',
+        })
+        assert camera.status_code == 201
+        assert camera.json()['site_id'] == site_id
+        paths.append(f"{prefix}/cameras/{camera.json()['id']}/model")
+    first_path, second_path, third_path = paths
+
+    for path, model in zip(paths, (model_a, model_a, model_b)):
+        initial = put(client, path, headers, model, 0)
+        assert initial.status_code == 200
+        assert initial.json()['revision'] == 1
+        assert initial.json()['model_version']['id'] == model
+
+    switched = put(client, first_path, headers, model_b, 1)
+    assert switched.status_code == 200
+    assert switched.json()['revision'] == 2
+    assert put(client, first_path, headers, model_a, 1).status_code == 409
+    assert client.get(foreign_path, headers=headers).status_code == 404
+    assert client.get(f'{foreign_path}/history', headers=headers).status_code == 404
+    assert put(client, foreign_path, headers, model_b, 0).status_code == 404
+
+    for path, model, revision, history in (
+        (first_path, model_b, 2, [(2, model_a, model_b), (1, None, model_a)]),
+        (second_path, model_a, 1, [(1, None, model_a)]),
+        (third_path, model_b, 1, [(1, None, model_b)]),
+    ):
+        current = client.get(path, headers=headers)
+        assert current.status_code == 200
+        assert current.json()['revision'] == revision
+        assert current.json()['model_version']['id'] == model
+        entries = client.get(f'{path}/history', headers=headers)
+        assert entries.status_code == 200
+        assert [(row['revision'], row['previous_model_version_id'], row['model_version_id'])
+                for row in entries.json()] == history
+
+
+@pytest.mark.parametrize('cause', ['expired', 'revoked'])
+def test_assignment_read_retains_selection_when_catalog_eligibility_is_lost(
+    client, assignment, admin_account, cause,
+):
+    headers, path, _, (model_a, _, _) = assignment
+    selected = put(client, path, headers, model_a, 0)
+    assert selected.status_code == 200
+    catalog = f"/api/v1/organizations/{admin_account['org_id']}/models/{model_a}"
+    assert client.get(catalog, headers=headers).status_code == 200
+
+    with SessionLocal.begin() as db:
+        evidence = db.scalars(select(ModelVerification).where(
+            ModelVerification.model_version_id == model_a,
+        )).one()
+        now = utcnow()
+        if cause == 'expired':
+            evidence.manifest_issued_at = now - timedelta(minutes=3)
+            evidence.verified_at = now - timedelta(minutes=2)
+            evidence.expires_at = now - timedelta(minutes=1)
+        else:
+            db.add(ModelVerificationRevocation(
+                verification_id=evidence.id, actor='synthetic-test', revoked_at=now,
+            ))
+
+    assert client.get(catalog, headers=headers).status_code == 404
+    assert put(client, path, headers, model_a, 1).status_code == 404
+    assert client.get(path, headers=headers).json() == selected.json()
+    assert [entry['revision'] for entry in client.get(f'{path}/history', headers=headers).json()] == [1]
 
 
 def test_assignment_access_and_validation(client, assignment, admin_account):

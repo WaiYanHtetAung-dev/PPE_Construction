@@ -191,6 +191,10 @@ def test_no_stale_lease_used_after_authority_disconnect(worker):
     state['mode'] = 'offline'
     assert client.post(INFERENCE_PATH, json=payload, headers=WORKER_AUTH).status_code == 503
     assert runtime.calls == 1
+    reads_after_disconnect = state['reads']
+    state['mode'] = 'good'
+    assert client.post(INFERENCE_PATH, json=payload, headers=WORKER_AUTH).status_code == 200
+    assert runtime.calls == 2 and state['reads'] == reads_after_disconnect + 3
 
 
 def test_worker_and_authority_require_separate_credentials(worker):
@@ -268,11 +272,18 @@ def test_postgres_authority_grants_live_evidence_and_business_only_rollback():
                 assert app.post(INFERENCE_PATH, json={}).status_code == 404
                 login = app.post('/api/v1/auth/login', json={'email': user.email, 'password': 'synthetic-rollback'})
                 assert login.status_code == 200
-                current = app.get(f'/api/v1/organizations/{org.id}/cameras/{camera}/model', headers={
-                    'Authorization': f"Bearer {login.json()['access_token']}",
-                })
+                headers = {'Authorization': f"Bearer {login.json()['access_token']}"}
+                organization = f'/api/v1/organizations/{org.id}'
+                assignment_path = f'{organization}/cameras/{camera}/model'
+                assert app.get(assignment_path, headers=LEASE_AUTH).status_code == 401
+                assert app.get(assignment_path, headers=WORKER_AUTH).status_code == 401
+                current = app.get(assignment_path, headers=headers)
                 assert current.status_code == 200 and current.json()['model_version']['id'] == model.id
                 assert current.json()['revision'] == 1
+                assert app.get(f'{organization}/models/{model.id}', headers=headers).status_code == 404
+                assert app.put(assignment_path, headers=headers, json={
+                    'model_version_id': model.id, 'expected_revision': 1,
+                }).status_code == 404
         finally:
             business_app.dependency_overrides.pop(get_db)
         with owner.connect() as db:

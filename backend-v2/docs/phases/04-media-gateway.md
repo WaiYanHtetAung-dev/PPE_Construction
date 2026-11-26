@@ -103,6 +103,31 @@ passes and two POSIX worker skips. The separate command
 recorded 12 passes and eight POSIX skips, including actual CPU ONNX inference
 outside the verified-worker path.
 
+### Phase 4 control-plane camera assignment sync
+
+**PENDING APPROVAL.** The [ADR-009 proposal](../DECISIONS.md#adr-009-proposal--workload-scoped-camera-assignment-snapshots)
+records the missing workload credential, atomic assignment and eligibility read,
+and freshness/revocation policy. The media dispatcher still receives trusted
+bindings from its caller. Existing admin and worker regression tests can
+validate their independent behavior with synthetic data. No live assignment
+refresh, cross-boundary queue invalidation, or revocation propagation test is
+available until the approved contract is implemented.
+
+From `backend-v2`, run the current-boundary regression checks with:
+
+```text
+python -m pytest -q tests/test_api.py tests/test_camera_models.py tests/test_model_catalog.py tests/test_model_verification.py tests/test_inference_worker.py
+python scripts/ci_checks.py media
+python scripts/check_architecture.py
+python scripts/verify_contracts.py
+```
+
+Windows D: validation reported 19 passes and 24 skips for the focused backend
+tests, and 17 passes and two POSIX skips for the media suite. The focused backend
+skips require POSIX file handling or a disposable PostgreSQL service. The
+architecture and snapshot checks passed. GitHub and GitLab use the existing
+shared backend and PostgreSQL jobs for the additional regressions.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.
