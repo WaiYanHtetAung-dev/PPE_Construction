@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Camera, Incident, IncidentOutbox, Organization, Site, utcnow
+from app.db.models import AuditLog, Camera, Incident, IncidentOutbox, Organization, OrganizationMembership, Site, utcnow
 from app.db.session import SessionLocal, get_db
 from app.incident_ingestion import create_ingestion
 from app.scripts import incident_outbox
@@ -110,6 +110,42 @@ def test_outbox_retry_retains_event_identity_and_marks_success(monkeypatch):
     assert sent == [incident_outbox.IncidentCreated(
         payload['event_id'], payload['organization_id'], created.json()['incident_id'],
     )] * 2
+
+
+def test_incident_status_transitions_require_org_admin_and_audit(client, admin_account):
+    with SessionLocal.begin() as db:
+        payload = seed(db)
+        membership = OrganizationMembership(user_id=admin_account['user_id'],
+                                            organization_id=payload['organization_id'], role='viewer')
+        db.add(membership)
+        db.flush()
+        membership_id = membership.id
+    with TestClient(create_ingestion(SECRET)) as internal:
+        created = internal.post(PATH, json=payload, headers=HEADERS)
+    assert created.status_code == 201
+    incident_id = created.json()['incident_id']
+    login = client.post('/api/v1/auth/login', json={
+        'email': admin_account['email'], 'password': admin_account['password'],
+    })
+    headers = {'Authorization': 'Bearer ' + login.json()['access_token']}
+    prefix = '/api/v1/organizations'
+    url = f"{prefix}/{payload['organization_id']}/incidents/{incident_id}/status"
+    acknowledge = {'status': 'acknowledged'}
+    resolve = {'status': 'resolved'}
+    assert client.patch(url, json=acknowledge).status_code == 401
+    assert client.patch(url, json=acknowledge, headers=headers).status_code == 404
+    wrong_org = f"{prefix}/{admin_account['org_id']}/incidents/{incident_id}/status"
+    assert client.patch(wrong_org, json=acknowledge, headers=headers).status_code == 404
+    with SessionLocal.begin() as db:
+        db.get(OrganizationMembership, membership_id).role = 'admin'
+    assert client.patch(url, json=resolve, headers=headers).status_code == 409
+    assert client.patch(url, json=acknowledge, headers=headers).json()['status'] == 'acknowledged'
+    assert client.patch(url, json=resolve, headers=headers).json()['status'] == 'resolved'
+    assert client.patch(url, json=acknowledge, headers=headers).status_code == 409
+    with SessionLocal() as db:
+        log = db.scalars(select(AuditLog).where(AuditLog.target_id == incident_id)).all()
+        assert {entry.action for entry in log} == {'incident.acknowledged', 'incident.resolved'}
+        assert all(entry.actor_user_id == admin_account['user_id'] for entry in log)
 
 
 def test_postgres_concurrent_duplicate_delivery():

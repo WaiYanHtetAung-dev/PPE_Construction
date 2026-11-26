@@ -429,6 +429,73 @@
         }
       }
     },
+    "/api/v1/organizations/{organization_id}/incidents/{incident_id}/status": {
+      "patch": {
+        "tags": [
+          "incidents"
+        ],
+        "summary": "Transition Incident",
+        "operationId": "transition_incident_api_v1_organizations__organization_id__incidents__incident_id__status_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Incident Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentTransition"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/platform/model-versions": {
       "post": {
         "tags": [
@@ -1123,6 +1190,24 @@
           "created_at"
         ],
         "title": "IncidentOutput"
+      },
+      "IncidentTransition": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "acknowledged",
+              "resolved"
+            ],
+            "title": "Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "IncidentTransition"
       },
       "LoginInput": {
         "properties": {

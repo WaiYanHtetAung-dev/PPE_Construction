@@ -1,6 +1,6 @@
 # Phase 3 — Secure inference result ingestion and incident lifecycle
 
-**Status:** Private ingestion, transactional outbox and an HTTPS delivery command implemented. Lifecycle transitions, PPE association rules and workload rotation verification remain open.
+**Status:** Private ingestion, transactional outbox, HTTPS delivery command and audited lifecycle transitions implemented. PPE association rules and workload rotation verification remain open.
 
 ## Scope and deliverables
 
@@ -51,6 +51,13 @@ and organization IDs. A failed delivery remains pending with exponential retry
 up to a five-minute delay. PostgreSQL locks prevent workers from selecting the
 same row concurrently. A crash after receiver acceptance can repeat delivery
 with the same key. No external receiver has been verified by these tests.
+
+Organization admins can use `PATCH /api/v1/organizations/{organization_id}/incidents/{incident_id}/status`
+to move an incident from `open` to `acknowledged` and then to `resolved`. Send
+`{"status":"acknowledged"}` or `{"status":"resolved"}`. The status change and an
+audit entry containing the actor and timestamp commit together. Invalid or
+repeated transitions return `409`. The existing organization authorization
+policy conceals unauthorized resources with `404`.
 
 From `backend-v2`, run `python -m pytest -q tests/test_incident_ingestion.py`.
 The PostgreSQL race test uses `PPE_DISPOSABLE_POSTGRES_URL` after Alembic upgrade
