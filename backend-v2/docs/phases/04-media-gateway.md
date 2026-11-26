@@ -21,7 +21,10 @@ adapter with a per-read timeout, samples by monotonic time and reconnects after
 EOF, I/O errors or stalled reads with capped exponential backoff. Source
 adapters own connection setup and cleanup and must bound their own setup time.
 `python -m unittest tests.test_media_sampler` exercises synthetic disconnect,
-stall, reconnect and cancellation paths.
+stall, reconnect and cancellation paths. It also runs one, two and three
+simultaneous synthetic samplers and checks camera attribution and shutdown.
+These fixtures emit decoded bytes in process. RTSP, inference and end-to-end
+pilot acceptance require additional tests.
 
 ## Design decisions and prerequisites
 
