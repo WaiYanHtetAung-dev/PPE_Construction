@@ -50,6 +50,7 @@ pytestmark = pytest.mark.skipif(os.getenv('PPE_STACK_RUN') != '1', reason='Use t
 CLASS_MAP = {label: detection(i, 1.0, (1, 1, 2, 2)).class_key for i, label in enumerate(LABELS)}
 FRAME_BYTES = WIDTH * HEIGHT * 3
 REPEAT_CYCLES = 3
+SAMPLING_COMPARISON_SECONDS = 12
 
 
 def owner_engine():
@@ -485,7 +486,84 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
                 model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events,
                 revision=revision, paced=paced,
             )
+    for interval in (0.2, 0.4):
+        async with asyncio.timeout(30):
+            await compare_sampling_interval(resolver, dispatcher, queue, paths, interval)
     assert list((frames_source / 'frames').iterdir()) == []
+
+
+async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval):
+    """Use the same eligible bindings and paced sources without artificial holds."""
+    cameras = tuple(paths)
+    assert all(await asyncio.gather(*(resolver.refresh(camera) for camera in cameras)))
+    age_by_camera = {camera: [] for camera in cameras}
+    warmed = set()
+    measuring = False
+    clock = asyncio.get_running_loop().time
+
+    async def consume():
+        while True:
+            queue.inference_busy = True
+            try:
+                row = await dispatcher.dispatch_one()
+            finally:
+                queue.inference_busy = False
+            if row is not None:
+                camera = row.frame.camera_id
+                active = resolver.current(camera, row.assignment_epoch)
+                assert active and row.assignment == active.assignment
+                assert row.frame.sample_interval == interval
+                warmed.add(camera)
+                if measuring:
+                    age = clock() - row.frame.sampled_monotonic
+                    assert age >= 0
+                    age_by_camera[camera].append(age)
+            await asyncio.sleep(0.02)
+
+    tasks = [asyncio.create_task(resolver.run()), asyncio.create_task(consume())]
+    for (camera, path), fps in zip(paths.items(), (10, 24, 30), strict=True):
+        tasks.append(asyncio.create_task(sample_camera(
+            camera, lambda path=path, fps=fps: paced_video(path, fps, lambda *_: None), queue,
+            sample_interval=interval, frame_timeout=4, retry_initial=0.7, retry_max=1.4,
+        )))
+    try:
+        await wait_for(lambda: len(warmed) == len(cameras), 6)
+        await asyncio.sleep(3)
+        before_offers, before_losses = queue.offers.copy(), queue.losses.copy()
+        started = clock()
+        measuring = True
+        await asyncio.sleep(SAMPLING_COMPARISON_SECONDS)
+        elapsed = clock() - started
+        measuring = False
+        offers, losses = queue.offers - before_offers, queue.losses - before_losses
+        assert all(age_by_camera.values())
+        assert not any(reason == 'replacement_held_response' for _, reason in losses)
+    finally:
+        for task in tasks:
+            task.cancel()
+        for result in await asyncio.gather(*tasks, return_exceptions=True):
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise result
+        while queue.take() is not None:
+            pass
+
+    print('PPE_STACK_SAMPLING ' + json.dumps({
+        'sample_interval_s': interval,
+        'measurement_s': round(elapsed, 3),
+        'cameras': [{
+            'input_target_fps': fps,
+            'offered': offers[camera],
+            'emitted': len(age_by_camera[camera]),
+            'emitted_fps': round(len(age_by_camera[camera]) / elapsed, 2),
+            'median_sample_to_result_ms': round(median(age_by_camera[camera]) * 1000, 2),
+            'max_sample_to_result_ms': round(max(age_by_camera[camera]) * 1000, 2),
+            'queue_replacements': sum(losses[camera, reason] for reason in (
+                'replacement_dispatch_busy', 'replacement_idle',
+            )),
+            'policy_rejections': losses[camera, 'policy_rejected'],
+            'queue_purges': losses[camera, 'purge_other'],
+        } for camera, fps in zip(cameras, (10, 24, 30), strict=True)],
+    }, sort_keys=True))
 
 
 async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worker,

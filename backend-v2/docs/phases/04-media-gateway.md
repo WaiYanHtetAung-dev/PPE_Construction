@@ -208,6 +208,16 @@ window. Dispatcher occupancy is an observed condition, not a causal estimate
 of production inference capacity. Frames still queued at shutdown and
 in-flight responses discarded by the assignment fence are reported separately.
 
+The stack also emits two `PPE_STACK_SAMPLING` summaries for sampling every
+0.2 s and 0.4 s. Both windows use the same three paced inputs, model assignments,
+worker, and queue limits. Each runs after a three-second warm-up and records
+12 seconds of steady-state measurements. The comparison has no test-imposed
+response hold, switch, or revocation. Per-camera sample age is wall-clock
+elapsed time from the sampler's monotonic timestamp through queueing, staging,
+HTTPS inference and response validation. It excludes decoding and source time.
+Emitted FPS and replacement counts are synthetic evidence for choosing the
+next pilot rate, with source pace and hardware unchanged between the arms.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.
