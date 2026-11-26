@@ -1,18 +1,22 @@
 # CI Integration Notes
 
-## GitLab backend compatibility
+## GitLab compatibility
 
-The root `.gitlab-ci.yml` provides backend and PostgreSQL 17 jobs for a Linux
+The root `.gitlab-ci.yml` provides backend, PostgreSQL 17 and browser jobs for a Linux
 Docker executor with job-scoped service networking. From `backend-v2`, both
 providers use `python scripts/ci_checks.py backend` and
 `python scripts/ci_checks.py postgres` after installing the requirements specified
-in their workflows. PostgreSQL must be a fresh CI service with `APP_ENV=ci`, user
+in their workflows. `sh frontend-v2/scripts/ci-build.sh` performs the shared
+frontend build and typecheck. `python backend-v2/scripts/ci_checks.py browser`
+runs the shared browser suite with Chromium. The GitLab browser job uses
+Debian Bookworm's Python and a workspace virtual environment, while GitHub
+uses Python 3.12. PostgreSQL must be a fresh CI service with `APP_ENV=ci`, user
 and database `ppe_ci`, and `DATABASE_URL` targeting `postgres:5432` in GitLab or
 `127.0.0.1:5432` in GitHub. The checked-in password is for that disposable service.
 
 GitLab runner execution is **NOT TESTED**. Before migration, validate the config
-with GitLab CI Lint and execute it on an authorized runner. Frontend/Chromium,
-Compose validation, image builds, image security gates, and provenance remain
+with GitLab CI Lint and execute it on an authorized runner. Compose validation,
+image builds, image security gates and provenance remain
 outside the GitLab config. Keep GitHub checks required until equivalent GitLab
 checks pass. These jobs require no deployment credentials, registry push,
 checkpoint, or production variables. Reserve protected variables and protected

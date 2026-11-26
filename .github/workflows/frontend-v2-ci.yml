@@ -48,17 +48,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend-v2/pnpm-lock.yaml
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: TypeScript validation
-        run: pnpm exec tsc --noEmit --project tsconfig.json
-
-      - name: Vite production build
-        run: pnpm run build
-
-      - name: Verify generated output
-        run: test -f dist/index.html
+      - name: Install locked dependencies, validate TypeScript and build
+        run: sh scripts/ci-build.sh
 
       - name: Setup Python for browser smoke
         uses: actions/setup-python@v5
@@ -75,7 +66,7 @@ jobs:
 
       - name: Test same-origin frontend and FastAPI in Chromium
         working-directory: backend-v2
-        run: python -m pytest -q tests/browser_smoke.py
+        run: python scripts/ci_checks.py browser
 
       - name: CI completed
         run: echo "PASS - Frontend V2 CI"

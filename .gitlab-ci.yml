@@ -29,3 +29,17 @@ postgres-integration:
     - cd backend-v2
     - python -m pip install -r requirements-dev.txt
     - python scripts/ci_checks.py postgres
+
+frontend-browser:
+  stage: test
+  image: node:22-bookworm
+  timeout: 15m
+  script:
+    - npm install --global --ignore-scripts pnpm@9.15.9
+    - sh frontend-v2/scripts/ci-build.sh
+    - apt-get update
+    - apt-get install --yes --no-install-recommends python3-venv
+    - python3 -m venv .venv/browser-ci
+    - .venv/browser-ci/bin/python -m pip install -r backend-v2/requirements-browser-smoke.txt
+    - .venv/browser-ci/bin/python -m playwright install --with-deps chromium
+    - .venv/browser-ci/bin/python backend-v2/scripts/ci_checks.py browser

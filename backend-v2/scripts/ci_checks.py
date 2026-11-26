@@ -23,6 +23,10 @@ def backend():
     run('scripts/verify_contracts.py')
 
 
+def browser():
+    run('-m', 'pytest', '-q', 'tests/browser_smoke.py')
+
+
 def postgres():
     from sqlalchemy import create_engine, text
     from sqlalchemy.engine import make_url
@@ -60,6 +64,6 @@ def postgres():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('check', choices=('backend', 'postgres'))
+    parser.add_argument('check', choices=('backend', 'browser', 'postgres'))
     check = parser.parse_args().check
-    {'backend': backend, 'postgres': postgres}[check]()
+    {'backend': backend, 'browser': browser, 'postgres': postgres}[check]()
