@@ -29,7 +29,8 @@ def browser():
 
 def media():
     run('-m', 'unittest', '-v', 'tests.test_frame_queue', 'tests.test_media_sampler',
-        'tests.media_decoder_integration')
+        'tests.media_decoder_integration', 'tests.test_inference_dispatch',
+        'tests.media_inference_integration')
 
 
 def postgres():

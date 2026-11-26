@@ -1,6 +1,6 @@
 # Phase 4 — RTSP ingest, frame sampling, camera health and AI integration
 
-**Status:** Bounded handoff, source sampling, reconnect logic and synthetic MP4 decoding implemented. RTSP, live camera health and inference integration remain planned.
+**Status:** Synthetic MP4 decoding, bounded sampling and authenticated inference v1 dispatch implemented. Live RTSP, camera health and service orchestration remain planned.
 
 ## Scope and deliverables
 
@@ -45,14 +45,63 @@ No live input or model is required.
 From `backend-v2` in the workspace Python environment, run:
 
 ```text
-python -m pip install -r requirements-media-test.txt
+python -m pip install -r requirements-dev.txt -r requirements-inference-cpu.txt -r requirements-media-test.txt
 python scripts/ci_checks.py media
 ```
 
 On Windows, point `TEMP` and `TMP` at an ignored D: workspace directory before
 running so fixture files stay on D:. Both CI providers call the same command.
 GitLab runner execution remains **NOT TESTED**. RTSP, inference and end-to-end
-pilot acceptance require separate tests.
+pilot acceptance with live inputs require separate tests.
+
+### Synthetic media to inference v1
+
+`InferenceDispatcher` drains the existing frame queue one frame at a time. It
+requires a trusted camera-to-assignment binding containing the organization,
+site, camera, model version UUID, key/version and original-to-canonical class
+map. Never build this binding from frame input. A future control-plane client
+must supply current assignments and refresh them when they change.
+
+The gateway validates frame metadata, stages one bounded PNG under a generated
+`frames/<uuid>.png` key, and submits the existing v1 request to a configured
+HTTPS worker origin with its dedicated ingress credential. The worker must see
+the same queue staging directory through its read-only frame mount. Provision
+the directory and its parents for trusted writers only, with group read access
+for the worker where separate users share the mount. Use disposable storage for
+test runs. A process crash can leave its one in-flight PNG for the operator to
+clean up before reuse.
+
+Inference v1 carries the frame/request IDs and model key/version. The gateway
+correlates the response against those exact values and retains org/site/camera,
+timestamps, and the assigned model version UUID in its own result envelope.
+The worker independently verifies the eligible version, manifest signature and
+artifact digest. The response does not repeat the model UUID, tenant metadata,
+or raw numeric class indices. The gateway validates original and canonical
+class labels, finite confidence and latency, and in-frame bounding boxes.
+
+One in-flight request and the existing newest-frame-per-camera queue limit
+memory and staged filenames. The worker request has a deadline and a 512 KiB
+response budget. Failed frames are dropped and the next sample may proceed.
+If staged-file cleanup fails, dispatch stops on that instance. Logs include
+the request UUID and normalized outcome. They exclude credentials, paths,
+frames, and response bodies.
+
+From `backend-v2`, install `requirements-dev.txt`,
+`requirements-inference-cpu.txt` and `requirements-media-test.txt`, then run
+`python scripts/ci_checks.py media`. Both CI providers execute this command.
+Mock transport tests cover validation, authentication responses, timeout and
+backpressure. Linux integration exercises PyAV, the real inference ASGI app,
+signature/eligibility checks and ONNX Runtime using temporary test-only model
+artifacts and an in-process authority. Verified-worker tests skip on Windows
+because the existing secure artifact reader relies on POSIX directory file
+descriptors. The test signer and leases are scoped to temporary fixtures and
+make no registry writes. Live performance remains **NOT TESTED**.
+
+Windows D: validation with Python 3.14 ran the shared media command with 17
+passes and two POSIX worker skips. The separate command
+`python -m pytest -q tests/test_onnx_cpu.py tests/test_inference_contract.py tests/test_contract_fixtures.py`
+recorded 12 passes and eight POSIX skips, including actual CPU ONNX inference
+outside the verified-worker path.
 
 ## Design decisions and prerequisites
 
