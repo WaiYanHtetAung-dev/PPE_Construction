@@ -1,6 +1,6 @@
 # Phase 4 — RTSP ingest, frame sampling, camera health and AI integration
 
-**Status:** Bounded frame handoff implemented. RTSP decoding, reconnect, live camera health and inference integration remain planned.
+**Status:** Bounded handoff, source sampling and reconnect logic implemented. Real RTSP decoding, live camera health and inference integration remain planned.
 
 ## Scope and deliverables
 
@@ -15,6 +15,13 @@ Limits apply to pending payloads. The dispatcher must separately bound in-flight
 work, and the decoder must bound its own buffers. Run
 `python -m unittest tests.test_frame_queue` from `backend-v2` for synthetic
 admission, ordering and concurrency checks.
+
+`media_gateway.sampler.sample_camera` reads decoded frames from a trusted source
+adapter with a per-read timeout, samples by monotonic time and reconnects after
+EOF, I/O errors or stalled reads with capped exponential backoff. Source
+adapters own connection setup and cleanup and must bound their own setup time.
+`python -m unittest tests.test_media_sampler` exercises synthetic disconnect,
+stall, reconnect and cancellation paths.
 
 ## Design decisions and prerequisites
 
