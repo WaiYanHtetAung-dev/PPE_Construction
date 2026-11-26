@@ -51,6 +51,7 @@ CLASS_MAP = {label: detection(i, 1.0, (1, 1, 2, 2)).class_key for i, label in en
 FRAME_BYTES = WIDTH * HEIGHT * 3
 REPEAT_CYCLES = 3
 SAMPLING_COMPARISON_SECONDS = 12
+SAMPLING_PAIR_ORDERS = ((0.2, 0.4), (0.4, 0.2), (0.2, 0.4), (0.4, 0.2))
 
 
 def owner_engine():
@@ -486,10 +487,52 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
                 model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events,
                 revision=revision, paced=paced,
             )
-    for interval in (0.2, 0.4):
-        async with asyncio.timeout(30):
-            await compare_sampling_interval(resolver, dispatcher, queue, paths, interval)
+    trials = []
+    for pair, order in enumerate(SAMPLING_PAIR_ORDERS, 1):
+        for position, interval in enumerate(order, 1):
+            async with asyncio.timeout(30):
+                trial = await compare_sampling_interval(resolver, dispatcher, queue, paths, interval)
+            trial.update(pair=pair, position=position)
+            trials.append(trial)
+            print('PPE_STACK_SAMPLING ' + json.dumps(trial, sort_keys=True))
+    print('PPE_STACK_SAMPLING_PAIRED ' + json.dumps(summarize_sampling_trials(trials), sort_keys=True))
     assert list((frames_source / 'frames').iterdir()) == []
+
+
+def summarize_sampling_trials(trials):
+    """Report paired effects and per-window medians without pooling unequal samples."""
+    by_interval = {interval: [trial for trial in trials if trial['sample_interval_s'] == interval]
+                   for interval in (0.2, 0.4)}
+    pairs = zip(by_interval[0.2], by_interval[0.4], strict=True)
+    metrics = ('emitted_fps', 'median_sample_to_result_ms', 'queue_replacements', 'source_fps')
+
+    def sum_field(trial, field):
+        return sum(camera[field] for camera in trial['cameras'])
+
+    return {
+        'pairs': [{
+            'pair': short['pair'], 'first_interval_s': 0.2 if short['position'] == 1 else 0.4,
+            'emitted_delta_04_minus_02': sum_field(long, 'emitted') - sum_field(short, 'emitted'),
+            'replacement_delta_04_minus_02':
+                sum_field(long, 'queue_replacements') - sum_field(short, 'queue_replacements'),
+            'sample_age_delta_ms_04_minus_02': [
+                round(long_camera['median_sample_to_result_ms'] - short_camera['median_sample_to_result_ms'], 2)
+                for short_camera, long_camera in zip(short['cameras'], long['cameras'], strict=True)
+            ],
+        } for short, long in pairs],
+        'arms': [{
+            'interval_s': interval, 'windows': len(arm),
+            'total_emitted': sum(sum_field(trial, 'emitted') for trial in arm),
+            'total_replacements': sum(sum_field(trial, 'queue_replacements') for trial in arm),
+            'camera_window_medians': [
+                {'input_target_fps': fps} | {
+                    field: round(median(trial['cameras'][index][field] for trial in arm), 2)
+                    for field in metrics
+                }
+                for index, fps in enumerate((10, 24, 30))
+            ],
+        } for interval, arm in by_interval.items()],
+    }
 
 
 async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval):
@@ -497,9 +540,17 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
     cameras = tuple(paths)
     assert all(await asyncio.gather(*(resolver.refresh(camera) for camera in cameras)))
     age_by_camera = {camera: [] for camera in cameras}
+    source_frames = Counter()
     warmed = set()
     measuring = False
     clock = asyncio.get_running_loop().time
+
+    def observe(camera):
+        def record(_now, _gap):
+            if measuring:
+                source_frames[camera] += 1
+
+        return record
 
     async def consume():
         while True:
@@ -522,8 +573,9 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
 
     tasks = [asyncio.create_task(resolver.run()), asyncio.create_task(consume())]
     for (camera, path), fps in zip(paths.items(), (10, 24, 30), strict=True):
+        record = observe(camera)
         tasks.append(asyncio.create_task(sample_camera(
-            camera, lambda path=path, fps=fps: paced_video(path, fps, lambda *_: None), queue,
+            camera, lambda path=path, fps=fps, record=record: paced_video(path, fps, record), queue,
             sample_interval=interval, frame_timeout=4, retry_initial=0.7, retry_max=1.4,
         )))
     try:
@@ -547,11 +599,12 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
         while queue.take() is not None:
             pass
 
-    print('PPE_STACK_SAMPLING ' + json.dumps({
+    return {
         'sample_interval_s': interval,
         'measurement_s': round(elapsed, 3),
         'cameras': [{
             'input_target_fps': fps,
+            'source_fps': round(source_frames[camera] / elapsed, 2),
             'offered': offers[camera],
             'emitted': len(age_by_camera[camera]),
             'emitted_fps': round(len(age_by_camera[camera]) / elapsed, 2),
@@ -563,7 +616,7 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
             'policy_rejections': losses[camera, 'policy_rejected'],
             'queue_purges': losses[camera, 'purge_other'],
         } for camera, fps in zip(cameras, (10, 24, 30), strict=True)],
-    }, sort_keys=True))
+    }
 
 
 async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worker,
