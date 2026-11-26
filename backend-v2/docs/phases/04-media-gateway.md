@@ -105,11 +105,12 @@ outside the verified-worker path.
 
 ### Phase 4 control-plane camera assignment sync
 
-**PENDING APPROVAL.** The [ADR-009 proposal](../DECISIONS.md#adr-009-proposal--workload-scoped-camera-assignment-snapshots)
-records the missing workload credential, atomic assignment and eligibility read,
-and freshness/revocation policy. The media dispatcher still receives trusted
-bindings from its caller. Existing admin and worker regression tests can
-validate their independent behavior with synthetic data. No live assignment
+**PENDING APPROVAL.** The [ADR-009 final proposal](../DECISIONS.md#adr-009-proposal--workload-scoped-camera-assignment-snapshots)
+defines the proposed workload credential, atomic assignment and eligibility
+read, and 5 s poll / 2 s deadline / 10 s lifetime pilot policy. The media
+dispatcher still receives trusted bindings from its caller. Existing admin and
+worker regression tests can validate their independent behavior with synthetic
+data. No live assignment
 refresh, cross-boundary queue invalidation, or revocation propagation test is
 available until the approved contract is implemented.
 

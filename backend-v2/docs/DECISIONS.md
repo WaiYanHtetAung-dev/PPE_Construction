@@ -28,9 +28,8 @@ Phase 2 acceptance evidence is pending. See [P2-01 through P2-08](../tests/specs
 
 ## ADR-009 proposal — Workload-scoped camera assignment snapshots
 
-**Status:** PENDING APPROVAL. This proposal introduces no endpoint, permission,
-credential, or runtime behavior. Review it with the project owner and the
-control-plane and model-security owners before implementing the resolver.
+**Status:** Final proposal, **PENDING PROJECT OWNER APPROVAL**. Stop before
+implementing the endpoint, provisioning credentials or wiring a resolver.
 
 ### Current boundaries
 
@@ -49,55 +48,216 @@ control-plane and model-security owners before implementing the resolver.
   existing evidence rules. Assignment revision alone is insufficient to order
   eligibility changes.
 
-### Proposed control-plane read and credential
+### Decision proposed for approval
 
-Add a private read-only snapshot operation owned by the control plane. Give the
-gateway a dedicated, audience-scoped workload identity bound server-side to an
-explicit organization, site and camera scope. Review credential provisioning,
-rotation, revocation, error disclosure and production role grants before use.
-Only the existing human API performs registration and assignment writes. Keep
-gateway access over a configured HTTPS origin with certificate verification,
-redirects disabled, bounded response size, and explicit request deadlines.
-Keep database credentials, model artifact paths, and worker-authority credentials
-out of the gateway.
+Use one private, read-only control-plane snapshot operation per camera.
+Keep registration and writes on the existing ADR-004 admin APIs. A separate
+internal listener owns the snapshot route. The gateway polls it directly over
+configured HTTPS with certificate and hostname verification, no redirects or
+environment proxies, a bounded body, and a total request deadline. Keep the
+publisher, verifier, revoker, worker eligibility authority, registry and
+inference v1 boundaries intact.
 
-Validate the provisioned camera → site → organization chain and read the
-assignment, immutable class map and current verification evidence at one
-authoritative database snapshot. Reuse the existing registry and eligibility
-view. Proposed response fields are an explicit eligible or denied state, org,
-site and camera IDs, assignment revision, model UUID/key/version, class map,
-verification generation, issued and expiry timestamps, and a request nonce for
-binding. The exact schema and negative status mapping need review. Responses
-should be `no-store`. Do not change inference v1 or the worker's independent
-artifact checks. The gateway must reject incompatible class maps before sending.
+The alternatives are a human admin session, a worker-authority credential,
+and a dedicated workload identity. Only the last option can supply camera
+scope with a read-only grant. Defer push-based invalidation and batched reads
+until the pilot shows that polling needs replacement.
 
-### Proposed consistency policy
+### Workload identity and authorization
 
-- Serialize refresh per camera. Reject lower revisions and conflicting model
-  identities at the same revision. Track the latest verification generation
-  separately and prevent a delayed pre-revocation response from restoring a
-  denied generation. Cross-camera notifications for shared models, denial
-  ordering and same-version re-verification require an accepted policy.
-- Use an explicit lease cap `T`, maximum healthy polling period `P`, and
-  request deadline `D`. Bound lease use with a monotonic deadline measured
-  from request start. An observed denial or failed refresh invalidates the
-  local binding. An expired snapshot cannot be used even if a poll stops.
-  Under healthy authoritative reads, the proposed observation window is at
-  most `P + D`. `T`, `P`, `D`, clock tolerance and overload behavior are review
-  inputs. No numerical revocation propagation bound is accepted or measured yet.
-- Bind queued frames to the active assignment generation and drop affected
-  pending frames on change or denial. Recheck generation before send and before
-  emitting results. The worker currently revalidates eligibility before ONNX
-  execution. Work already executing may finish. The proposed gateway discards
-  a late result after local invalidation and does not promise global cancellation.
+- Provision a stable gateway principal for one organization and an explicit
+  allowlist of site/camera pairs. A gateway serving another organization uses a
+  separate principal. The server binds the principal to its allowlist and the
+  snapshot audience. Request IDs identify the desired resource only.
+- Use a dedicated opaque bearer credential composed of a random key ID and a
+  256-bit random secret. Store only a secret digest and metadata. Compare the
+  digest in constant time. Resolve the credential on the trusted service side
+  and recheck its active grant, audience, scope and time validity in the same
+  authoritative statement as the snapshot. Keep plaintext credentials in a
+  protected runtime secret. Gateway, worker ingress, worker authority and
+  human session credentials have separate audiences and lifecycles.
+- Use a restricted operator path to provision, rotate and revoke credentials
+  with audit records containing principal/key ID, action and time. Proposed
+  keys are valid for at most 24 hours, with at most two active keys per
+  principal during up to 5 minutes of
+  intentional overlap. Install and verify the replacement, then revoke the
+  old key. On credential reload, clear the old binding epochs and poll with
+  the replacement. Disabling a compromised key or principal denies new reads
+  after the change commits. On `401`, clear bindings for the affected credential
+  and require fresh authorization. Previously issued snapshots are bounded by
+  their lease and also by the key's expiry.
+- Use a read-only DB role for the snapshot listener with the minimum projection
+  of credential state, authorized scope, current assignment and eligibility
+  evidence. Provisioning and revocation writes use separate roles. Keep model
+  artifact location, digest, database credentials and worker-authority
+  credentials out of the gateway. Suppress request bodies, credential headers,
+  exception bodies, SQL parameter values and detailed auth failures in logs.
 
-### Evidence required after approval
+### Snapshot API v1 proposal
 
-Test scoped service auth, malformed or expired snapshots, stale and overlapping
-refreshes, an outage with recovery, three-camera switching and tenant isolation,
-class-map compatibility, pre-send and in-flight revocation, and the documented
-propagation bound. Test temporary models independently of Finalboss. Until then,
-existing admin API and worker tests show independent boundaries only.
+`POST /internal/v1/camera-assignment-snapshots` is read-only in effect. POST
+keeps the request nonce and resource tuple in a typed JSON body. Require explicit
+`schema_version` (`"1.0"`), `organization_id`, `site_id`, `camera_id` and a fresh
+UUID `nonce`. Scope is always validated server-side. Limit request bodies to
+2 KiB and responses to 512 KiB. Every response includes `Cache-Control: no-store`.
+
+| Response field | Type and invariant |
+| --- | --- |
+| `schema_version` | Literal `"1.0"`, required |
+| `organization_id`, `site_id`, `camera_id`, `nonce` | UUIDs, exact request binding |
+| `assignment_revision` | Integer `0..2^63-1`, committed camera revision |
+| `decision` | `eligible`, `unassigned`, `camera_disabled`, `revoked`, `expired`, or `unverified` |
+| `model` | `{model_version_id: UUID, model_key: string, version: string}` matching the current selection, or `null` when no model is selected |
+| `class_map` | Eligible snapshots only. Immutable registry original-label to canonical `person`, `helmet`, or `vest` map using existing registry limits. `null` on denials. |
+| `verification_generation` | Positive verification row ID for the selected model, or `null` when no evidence exists. Required for eligible, revoked and expired evidence. |
+| `revoked_through_generation` | Largest revoked verification row ID for the selected model, or `null`. Include it even when a later generation is eligible. |
+| `issued_at`, `expires_at` | Aware UTC timestamps from the database. Eligible expiry is the earliest of issuance + `T`, evidence expiry and credential expiry. Denials have `expires_at == issued_at`. |
+
+Reject duplicate or unknown fields, unsupported versions, inconsistent
+decision/nullability, invalid TTL and incompatible class maps. Apply a timely,
+nonce-bound zero-lifetime denial even though it cannot authorize dispatch. A
+map must match the gateway's trusted supported class profile before dispatch.
+The worker independently verifies its eligible model and artifact. The
+inference v1 response does not
+echo a model UUID or the evidence generation, so the gateway's generation fence
+tracks its own snapshot, not the generation used inside an already-started RPC.
+
+| HTTP status | Meaning and gateway action |
+| --- | --- |
+| `200` | Scoped camera read. Only `eligible` can activate a binding. Any denial clears the camera binding. A definitive revocation also fences affected local bindings of the same model. |
+| `401` | Missing, malformed, expired, revoked or wrong-audience credential. Uniform response. Clear bindings authenticated with that credential. |
+| `404` | Camera absent, wrong tuple or outside scope. Uniform response. Clear the requested binding. |
+| `422` | Structurally invalid body or unsupported version after authentication. Clear the requested binding. Requests over the body limit receive `413`. |
+| `429`, `503` | Overload or unavailable authoritative state. Clear the requested binding. Retry at the next scheduled poll. |
+
+Other unexpected statuses, timeouts and malformed responses fail closed. Error
+bodies provide generic details and exclude scope, credentials and evidence.
+
+### Atomic read and ordering
+
+Use one fresh `READ COMMITTED` statement on the PostgreSQL primary per poll.
+Join current credential and scope, camera → site → organization, assignment,
+immutable model metadata, latest verification and revocation rows. Reuse the
+existing eligibility view with explicit checks for camera enablement and
+positive remaining evidence lifetime. Use the statement's issuance timestamp and
+cap expiry as above. Serve the decision and its ordering fields from that
+same MVCC snapshot. A revoked latest generation takes precedence over expiry.
+Once a change commits, later primary statements observe it. An earlier
+statement can still return a prior view of state. No replica or intermediary
+cache is in the admission path.
+
+- Maintain one refresh in flight per camera, a local refresh ticket and a new
+  nonce. Ignore responses for superseded tickets before mutating state. A
+  current response with a lower assignment revision or conflicting model
+  identity at the same revision fails closed. Preserve the last known
+  revision and identity across transient failures. A restored response at the
+  same revision may renew otherwise unchanged, still eligible evidence.
+- Maintain a separate newest-observed verification generation and revoked
+  floor per model across the gateway's scoped cameras. Apply the floor before
+  accepting an eligible response. A current response with a lower verification
+  generation for the same model fails closed for that camera. An observed floor
+  invalidates affected local bindings at or below that generation and fences
+  replies still in flight. Observing newer evidence also invalidates bindings of older
+  generations. Each camera must refresh under its own scope. New positive
+  state is never copied between cameras.
+- The existing promoter and revoker serialize per model and require evidence
+  issued after revocation for re-verification. A newer authoritative eligible
+  generation strictly above the floor may reactivate the same model UUID
+  without advancing the camera revision. A current snapshot returns the floor
+  even if revoke and re-verification both happened between polls. Thus a
+  delayed response for the pre-revocation generation cannot reactivate it.
+  Keep ordering state while matching provisioned bindings, pending frames or
+  requests exist. Retire it only when these references are gone and future
+  use requires a fresh primary read. Gateways restart with no positive
+  snapshots and reacquire from the primary.
+
+### Pilot timing and revocation bounds
+
+| Setting | Proposed pilot value | Rationale |
+| --- | --- | --- |
+| `P` | 5 s maximum healthy start-to-start poll interval per camera | Stagger 2–3 cameras at 0.4–0.6 requests/s total and cap concurrency at one refresh per camera. |
+| `D` | 2 s total request deadline | Includes connect, TLS, read and validation. A missed or failed slot has no inline retry. Resume at the next slot without a catch-up burst. |
+| `T` | 10 s maximum positive snapshot lifetime | Gives 3 s over `P + D` while bounding use if polling stalls. Evidence or credential expiry can shorten it. |
+
+Use a suspend-inclusive monotonic clock where supported. Fail closed on resume
+and reacquire if the clock cannot account for suspension. The local deadline
+is `request_start_monotonic + min(T, expires_at - issued_at)`, never response
+receipt plus lifetime. Reject expired responses and check the deadline at
+send and result emission. UTC is used for validating the server's lifetime,
+with no client wall-clock subtraction in the admission deadline.
+
+For a revocation that remains in effect, a healthy gateway with primary reads
+and enforced `P` and `D` observes denial or fails closed within **7 s** of
+commit. With missed polling or scheduling stalls, the last pre-commit grant
+cannot authorize a new send or result emission after **10 s** from commit
+under the expiry rule. Observed revocation blocks affected local dispatch
+immediately before any next send decision. These are proposed local bounds,
+not measured production SLOs. They exclude already-emitted responses and do
+not promise instantaneous cross-gateway observation or cancellation of worker
+compute. For re-verification between polls, apply the returned revoked floor
+to older work and allow the newer generation only after a valid fresh poll.
+
+Record committed-change to observed-denial time, last old-generation
+send/emission, timeout count, and missed polling slots during acceptance.
+Evaluate the worker authority's separate lease separately from gateway timing.
+At 100 cameras, this polling policy implies 20 requests/s before overhead.
+Benchmark query latency, pools, scheduling jitter and revocation bounds before
+considering batched snapshots or invalidation notifications. Keep a single
+primary read path and the same authorization and ordering semantics if scaling.
+
+### Queue and in-flight policy
+
+Admit a frame only with a usable snapshot and tag it with the camera's
+current binding epoch.
+An authorization loss, expiry, switch or verification generation change
+increments the epoch and drops affected pending frames. Fresh frames after
+reactivation may enter with the new epoch. An identical eligible refresh can
+extend expiry within its new lease without changing the epoch. Preserve the
+bounded queue and independent camera handling. Check epoch, model identity,
+known revocation and expiry immediately before sending and again at the
+downstream handoff. If handoff yields or queues asynchronously, carry the
+epoch and recheck at actual emission. Discard late results across an invalidation
+boundary and clean staged files on every path. A request already executing may
+finish at the worker. Never retry it under a different assignment.
+
+### Acceptance matrix and proposed file plan
+
+| Layer | Deterministic acceptance cases |
+| --- | --- |
+| Unit, fake clocks and transport | Strict shape, nonce and scope echo; incompatible class map; `401` scope-wide invalidation; `404`/`422`/`429`/`503`, timeout and expiry fail closed; reject stale revision/generation and reordered responses; allow newer re-verification only with a fresh scoped poll; fail closed on suspend/resume; bounded queue, cleanup and redacted logs. |
+| Disposable PostgreSQL | Read-only grants; human and worker tokens denied; scoped key rotation/expiry/revocation; wrong org/site/camera indistinguishable from absent; two connections with explicit barriers around assignment/revocation commits; no torn result; latest evidence and revoked floor present after revoke/reverify, with original publisher/verifier restrictions intact. |
+| Synthetic gateway | Three cameras `A/A/B → B/A/B`; sibling independence, distinct frame/model attribution and pytest barriers for queued/in-flight invalidation; shared-model revoke before send and during a delayed response; outage and validated recovery; observe `P+D` and `T` with deterministic time and measure them on the isolated pilot; independent ONNX worker rejects ineligible model. Use generated fixtures only. |
+| Regression and CI | Existing API and inference v1 snapshots, application tests, media suite and disposable PostgreSQL checks. Use the existing shared GitHub/GitLab commands. Actual GitLab Runner result remains separate. |
+
+Use a fake-clock boundary test with the first poll at `t=0`, a revocation
+just after that statement observes an eligible model, and the next poll
+starting by `t=5`. Test denial or a deadline by `t=7`. In a separate case stop
+polling and assert that the original lease denies sends and emissions at
+`t=10`. Also test evidence with less than 2 s left at issue so a response may
+arrive before the request deadline and still be too late to use.
+
+Proposed files after approval:
+
+- `backend-v2/app/assignment_snapshot.py` and
+  `backend-v2/app/contracts/assignment_snapshot.py` for the private listener
+  and typed schema. Add separately reviewed Alembic credential/scope storage
+  and role grants if required by the approved provisioning design.
+- `backend-v2/media_gateway/assignment_resolver.py`, `frame_queue.py`, and
+  `inference_dispatch.py` for refresh, epoch binding and result fencing.
+- `backend-v2/tests/test_assignment_snapshot.py` and
+  `tests/media_assignment_integration.py` for deterministic tests. Wire them
+  through `backend-v2/scripts/ci_checks.py` and record results in the media
+  phase documentation.
+
+### Items for explicit owner approval
+
+Approve the private listener, PostgreSQL projection and role boundaries;
+scoped identity, credential lifecycle and operator audit; v1 schema and
+negative statuses; pilot timing and documented guarantee assumptions;
+cross-camera revoke/reverify ordering and queue/in-flight policy. Approval
+covers implementation and synthetic tests only. If rolled back, disable the
+new listener and revoke its keys. Keep existing assignments and history, and
+require fresh authorization before resuming gateway dispatch.
 
 ## ADR record template
 
