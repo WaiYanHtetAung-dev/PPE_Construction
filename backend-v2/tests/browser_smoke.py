@@ -13,7 +13,7 @@ import pytest
 import uvicorn
 from playwright.sync_api import expect, sync_playwright
 
-from app.db.models import Camera, Incident, Site
+from app.db.models import Camera, Incident, Organization, OrganizationMembership, Site
 from app.db.session import SessionLocal
 from app.main import app
 
@@ -128,3 +128,38 @@ def test_same_origin_session_and_data(smoke_origin, admin_account):
         assert page.request.get(f'{smoke_origin}{ME}', headers={
             'Authorization': f'Bearer {token}',
         }).status == 401
+
+
+def test_switch_organization_and_handle_unauthorized(smoke_origin, admin_account):
+    with SessionLocal.begin() as db:
+        other = Organization(name='Other Smoke Organization')
+        db.add(other)
+        db.flush()
+        other_id = other.id
+        db.add(OrganizationMembership(user_id=admin_account['user_id'],
+                                      organization_id=other_id, role='viewer'))
+
+    with sync_playwright() as playwright, closing(playwright.chromium.launch()) as browser:
+        page = browser.new_page()
+        page.goto(smoke_origin)
+        page.get_by_label('Email').fill(admin_account['email'])
+        page.get_by_label('Password').fill(admin_account['password'])
+        page.get_by_role('button', name='Sign in').click()
+        organization = page.get_by_role('combobox', name='Organization')
+        expect(organization).to_be_visible()
+        if organization.input_value() != admin_account['org_id']:
+            organization.select_option(admin_account['org_id'])
+        camera = page.get_by_text('Smoke Test Camera', exact=True).first
+        expect(camera).to_be_visible()
+
+        other_sites = f'{smoke_origin}/api/v1/organizations/{other_id}/sites'
+        with page.expect_response(other_sites) as switched:
+            organization.select_option(other_id)
+        assert switched.value.status == 200
+        expect(camera).to_have_count(0)
+        expect(page.get_by_text('smoke-violation', exact=True)).to_have_count(0)
+
+        page.route(other_sites, lambda route: route.fulfill(status=401))
+        page.get_by_role('button', name='Refresh data').click()
+        expect(page.get_by_role('heading', name='PPE V2 Sign In')).to_be_visible()
+        expect(page.get_by_role('alert')).to_have_text('Your session has ended. Sign in again.')
