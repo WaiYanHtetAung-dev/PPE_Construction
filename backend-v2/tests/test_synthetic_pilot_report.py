@@ -19,8 +19,11 @@ def measurements():
     restart = {'sample_interval_s': 0.3, 'outage_dispatch_s': 1.502, 'worker_tls_ready_s': 0.5,
                'restart_to_all_cameras_s': 1.2, 'restart_to_camera_s': [1.2],
                'raw_error': '<script>alert(1)</script>'}
-    reconnect = {'elapsed_s': 54, 'cycles': [{'camera': 1, 'mode': 'stall', 'source_offline_s': 4,
-                  'blocked_retries': 2, 'unaffected_results': 9, 'restore_to_result_s': 1.1}],
+    reconnect = {'elapsed_s': 90, 'cycles': [{
+        'sources': [{'camera': 1, 'mode': 'stall', 'blocked_retries': 2, 'restore_to_result_s': 1.1},
+                    {'camera': 2, 'mode': 'eof', 'blocked_retries': 4, 'restore_to_result_s': 1.2}],
+        'source_offline_s': 4, 'unaffected_results': 9, 'mean_peer_results_per_s': 2.25,
+        'peak_pending': 2, 'peak_pending_bytes': 6144, 'queue_replacements': 1}],
                  'cameras': [{'camera': 1, 'offered': 11, 'emitted': 8, 'replaced': 2, 'rejected': 0, 'purged': 0,
                               'pending_at_shutdown': 1, 'in_flight_at_shutdown': 0}]}
     return trials, summary, restart, reconnect
@@ -32,8 +35,9 @@ def test_report_labels_fixtures_and_summarizes_measured_windows(measurements):
     assert '<td>9.00</td><td>3.00</td><td>2.00</td><td>300.00</td>' in page
     assert '<td>9</td><td>0</td><td>3</td><td>1.200</td>' in page
     assert '<td>72</td><td>9</td>' in page
-    assert '<td>Frame stall</td>' in page
-    assert '<td>2</td>\n          <td>9</td><td>1.100</td>' in page
+    assert 'Camera 1 (Frame stall)<br>Camera 2 (End of stream)' in page
+    assert '<td>2<br>4</td>' in page and '<td>1.100<br>1.200</td>' in page
+    assert '<td>9</td><td>2.25</td>' in page and '<td>2 <small>6.0 KiB</small></td>' in page
     assert 'default-src \'none\'' in page
     assert '<script' not in page and 'private-fixture-identifier' not in page
 

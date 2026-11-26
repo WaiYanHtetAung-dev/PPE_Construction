@@ -60,8 +60,8 @@ ZIP into the workspace (for example under `.venv`) and open
 `synthetic-pilot.html` in a browser. The report shows per-camera decoded FPS,
 sampling and result rates, frame drops, and time to the first fresh result
 after restarting the synthetic worker. The source reconnect soak section shows
-six EOF or stalled-read cycles, peer inference results, and per-camera frame
-counts. The report opens directly from disk.
+six single-source outages and three overlapping outages, peer inference rates,
+queue pressure, and per-camera recovery. The report opens directly from disk.
 
 On a disposable Linux runner with the stack prerequisites, generate the same
 report from `backend-v2`:

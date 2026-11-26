@@ -243,18 +243,22 @@ numeric measurements and generated fixture labels. The Backend V2 GitHub job
 uploads the HTML after the stack test passes. A capable GitLab runner can
 generate the same file with the shared command.
 
-`PPE_STACK_RECONNECT_SOAK` exercises six interruptions at the 0.3 s candidate
-interval. Each of the three continuously paced sources hits one injected EOF
-and one stalled read at the source boundary. Each outage remains active for at
-least two unsuccessful reconnect attempts and two fresh results per peer
-camera. An existing queued or in-flight frame sampled before the interruption
-may finish. Recovery requires a new source epoch and a sample captured after
-the source becomes available. There are five healthy seconds before the first
-fault and after each recovery. Test-only read and retry settings are a 2 s
-deadline and 0.5–1.0 s backoff. The run has a 100 s deadline.
+`PPE_STACK_RECONNECT_SOAK` exercises nine outages at the 0.3 s candidate
+interval. The six single-source outages cover EOF and stalled reads for each
+fixture. Three overlapping outages rotate which source stays healthy. Each
+pair has one EOF and one stalled read, injected and restored together. Every
+outage remains active for at least two unsuccessful attempts per interrupted
+source and two fresh results per running source. An existing queued or
+in-flight frame sampled before the interruption may finish. Recovery requires
+each interrupted source to produce a new source epoch and a sample captured
+after restoration. There are five healthy seconds before the first fault and
+after each recovery. Test-only settings are a 2 s read deadline and 0.5–1.0 s
+backoff. The run has a 135 s deadline.
 
-The HTML report includes the per-cycle outage and recovery timings and the
-per-camera soak counts. The harness accounts for every offered sample as an
+The HTML report includes per-source recovery, peer result rates, and per-outage
+pending frame and byte peaks and replacements. Peer rates count frames sampled
+and returned within the measured outage. Queue peaks include any frames already
+queued at the start. The harness accounts for every offered sample as an
 emitted result, replacement, rejection, purge, or work remaining at shutdown.
 The source faults are injected around actual local-video replay. Network and
 RTSP recovery require separate testing.

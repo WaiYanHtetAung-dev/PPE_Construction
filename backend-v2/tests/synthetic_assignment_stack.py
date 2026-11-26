@@ -163,6 +163,11 @@ class MeasuredQueue(FrameQueue):
         self.revoking = set()
         self.inference_busy = False
         self.response_held = lambda: False
+        self.reset_pending_peak()
+
+    def reset_pending_peak(self):
+        self.peak_pending = len(self._pending)
+        self.peak_pending_bytes = self._pending_bytes
 
     def offer(self, frame):
         camera = frame.camera_id
@@ -170,6 +175,10 @@ class MeasuredQueue(FrameQueue):
         pending_before = camera in self._pending
         purges_before = self.purges[camera]
         admitted = super().offer(frame)
+        self.peak_pending = max(self.peak_pending, len(self._pending))
+        self.peak_pending_bytes = max(self.peak_pending_bytes, self._pending_bytes)
+        assert self.peak_pending <= self._max_cameras
+        assert self.peak_pending_bytes <= self._max_bytes
         if not admitted:
             # The fixtures are fixed-size and the queue has exactly one full slot per camera.
             assert len(frame.data) == FRAME_BYTES

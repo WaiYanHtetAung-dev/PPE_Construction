@@ -50,7 +50,14 @@ async def run_reconnect_soak(resolver, dispatcher, queue, paths):
     emitted = Counter()
     unaffected_results = Counter()
     fault_window = None
+    recovering = {}
+    first_recovered = {}
     cycles = []
+    indexes = {camera: index for index, camera in enumerate(sources, 1)}
+    first, second, third = sources
+    scenarios = [{camera: mode} for mode in ('eof', 'stall') for camera in sources]
+    scenarios += [{left: 'eof', right: 'stall'}
+                  for left, right in ((first, second), (second, third), (third, first))]
 
     async def consume():
         while True:
@@ -66,19 +73,23 @@ async def run_reconnect_soak(resolver, dispatcher, queue, paths):
                 assert camera in sources and active and row.assignment == active.assignment
                 assert frame.sample_interval == interval
                 if camera in last:
-                    previous, _ = last[camera]
+                    previous = last[camera]
                     assert frame.sampled_monotonic > previous.sampled_monotonic
                     assert (frame.source_epoch, frame.source_frame_index) > (
                         previous.source_epoch, previous.source_frame_index)
                 if fault_window and frame.sampled_monotonic >= fault_window[1]:
-                    assert camera != fault_window[0]
+                    assert camera not in fault_window[0]
                     unaffected_results[camera] += 1
-                last[camera] = (frame, clock())
+                if camera in recovering:
+                    epoch, restored_at = recovering[camera]
+                    if frame.source_epoch > epoch and frame.sampled_monotonic >= restored_at:
+                        first_recovered.setdefault(camera, clock())
+                last[camera] = frame
                 emitted[camera] += 1
             await asyncio.sleep(0.02)
 
     started = clock()
-    async with asyncio.timeout(100), asyncio.TaskGroup() as group:
+    async with asyncio.timeout(135), asyncio.TaskGroup() as group:
         tasks = [group.create_task(resolver.run()), group.create_task(consume())]
         for camera, source in sources.items():
             tasks.append(group.create_task(sample_camera(
@@ -88,39 +99,58 @@ async def run_reconnect_soak(resolver, dispatcher, queue, paths):
         try:
             await wait_for(lambda: len(last) == len(sources), 8)
             await asyncio.sleep(5)
-            for mode in ('eof', 'stall'):
-                for index, (camera, source) in enumerate(sources.items(), 1):
-                    previous, _ = last[camera]
-                    peer_epochs = {peer: last[peer][0].source_epoch
-                                   for peer in sources if peer != camera}
-                    unaffected_results.clear()
+            for faults in scenarios:
+                peer_epochs = {camera: last[camera].source_epoch for camera in sources
+                               if camera not in faults}
+                previous_epochs = {camera: last[camera].source_epoch for camera in faults}
+                unaffected_results.clear()
+                recovering.clear()
+                first_recovered.clear()
+                queue.reset_pending_peak()
+                outage_losses_before = queue.losses.copy()
+                faulted_at = clock()
+                fault_window = (faults, faulted_at)
+                for camera, mode in faults.items():
+                    source = sources[camera]
                     source.retries.clear()
                     source.stall_cancelled = False
-                    faulted_at = clock()
-                    fault_window = (camera, faulted_at)
                     source.fault = mode
-                    await wait_for(lambda: len(source.retries) >= 2 and
-                                   all(unaffected_results[peer] >= 2 for peer in peer_epochs), 8)
-                    assert all(last[peer][0].source_epoch == epoch
-                               for peer, epoch in peer_epochs.items())
+                await wait_for(lambda: all(len(sources[camera].retries) >= 2 for camera in faults)
+                               and all(unaffected_results[peer] >= 2 for peer in peer_epochs), 8)
+                assert all(last[peer].source_epoch == epoch for peer, epoch in peer_epochs.items())
+                for camera, mode in faults.items():
+                    source = sources[camera]
                     assert all(b - a >= retry_initial - 0.01
                                for a, b in zip(source.retries, source.retries[1:]))
                     if mode == 'stall':
                         assert source.stall_cancelled
 
-                    restored_at = clock()
-                    fault_window = None
-                    source.fault = None
-                    await wait_for(lambda: last[camera][0].source_epoch > previous.source_epoch and
-                                   last[camera][0].sampled_monotonic >= restored_at, 5)
-                    _, received_at = last[camera]
-                    cycles.append({
-                        'camera': index, 'mode': mode, 'blocked_retries': len(source.retries),
-                        'unaffected_results': sum(unaffected_results.values()),
-                        'source_offline_s': round(restored_at - faulted_at, 3),
-                        'restore_to_result_s': round(received_at - restored_at, 3),
-                    })
-                    await asyncio.sleep(5)
+                outage_losses = queue.losses - outage_losses_before
+                peak_pending, peak_bytes = queue.peak_pending, queue.peak_pending_bytes
+                restored_at = clock()
+                outage_seconds = restored_at - faulted_at
+                fault_window = None
+                recovering.update({camera: (epoch, restored_at)
+                                   for camera, epoch in previous_epochs.items()})
+                for camera in faults:
+                    sources[camera].fault = None
+                await wait_for(lambda: len(first_recovered) == len(faults), 5)
+                cycles.append({
+                    'sources': [{
+                        'camera': indexes[camera], 'mode': mode,
+                        'blocked_retries': len(sources[camera].retries),
+                        'restore_to_result_s': round(first_recovered[camera] - restored_at, 3),
+                    } for camera, mode in faults.items()],
+                    'source_offline_s': round(outage_seconds, 3),
+                    'unaffected_results': unaffected_results.total(),
+                    'mean_peer_results_per_s': round(unaffected_results.total() /
+                                                     (outage_seconds * len(peer_epochs)), 2),
+                    'peak_pending': peak_pending,
+                    'peak_pending_bytes': peak_bytes,
+                    'queue_replacements': sum(count for (_, reason), count in outage_losses.items()
+                                              if reason.startswith('replacement_')),
+                })
+                await asyncio.sleep(5)
         finally:
             for task in tasks:
                 task.cancel()

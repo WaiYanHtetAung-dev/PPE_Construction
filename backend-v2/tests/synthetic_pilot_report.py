@@ -27,12 +27,18 @@ def render_report(trials, summary, restart, reconnect):
         for arm in summary['arms']
     )
     mode_labels = {'eof': 'End of stream', 'stall': 'Frame stall'}
-    reconnect_rows = ''.join(
-        f'''<tr><th scope="row">Camera {row['camera']:d}</th><td>{mode_labels[row['mode']]}</td>
-          <td>{row['source_offline_s']:.3f}</td><td>{row['blocked_retries']:d}</td>
-          <td>{row['unaffected_results']:d}</td><td>{row['restore_to_result_s']:.3f}</td></tr>'''
-        for row in reconnect['cycles']
-    )
+    reconnect_rows = []
+    for row in reconnect['cycles']:
+        sources, retries, recovery = [], [], []
+        for source in row['sources']:
+            sources.append(f"Camera {source['camera']:d} ({mode_labels[source['mode']]})")
+            retries.append(f"{source['blocked_retries']:d}")
+            recovery.append(f"{source['restore_to_result_s']:.3f}")
+        reconnect_rows.append(f'''<tr><th scope="row">{'<br>'.join(sources)}</th>
+          <td>{row['source_offline_s']:.3f}</td><td>{'<br>'.join(retries)}</td>
+          <td>{row['unaffected_results']:d}</td><td>{row['mean_peer_results_per_s']:.2f}</td>
+          <td>{row['peak_pending']:d} <small>{row['peak_pending_bytes'] / 1024:.1f} KiB</small></td>
+          <td>{row['queue_replacements']:d}</td><td>{'<br>'.join(recovery)}</td></tr>''')
     soak_rows = ''.join(
         f'''<tr><th scope="row">Camera {row['camera']:d}</th><td>{row['offered']:d}</td>
           <td>{row['emitted']:d}</td><td>{row['replaced']:d}</td><td>{row['rejected']:d}</td><td>{row['purged']:d}</td>
@@ -108,16 +114,19 @@ def render_report(trials, summary, restart, reconnect):
   </section>
   <section aria-labelledby="reconnect-heading">
     <h2 id="reconnect-heading">Source reconnect soak</h2>
-    <p>{reconnect['elapsed_s']:.1f} s at {interval:.1f} s sampling with one interrupted source per cycle.</p>
+    <p>{reconnect['elapsed_s']:.1f} s at {interval:.1f} s sampling with single and overlapping outages.</p>
     <div class="table-wrap" role="region" aria-labelledby="reconnect-heading" tabindex="0">
       <table aria-labelledby="reconnect-heading">
-        <thead><tr><th scope="col">Fixture</th><th scope="col">Interruption</th><th scope="col">Offline (s)</th>
-          <th scope="col">Blocked retries</th><th scope="col">Peer results</th>
+        <thead><tr><th scope="col">Interrupted fixtures</th><th scope="col">Offline (s)</th>
+          <th scope="col">Blocked retries</th><th scope="col">Peer results</th><th scope="col">Results / s per peer</th>
+          <th scope="col">Peak queued</th><th scope="col">Replaced</th>
           <th scope="col">Restore to result (s)</th></tr></thead>
-        <tbody>{reconnect_rows}</tbody>
+        <tbody>{''.join(reconnect_rows)}</tbody>
       </table>
     </div>
-    <p class="note">Peer results use fresh samples from the two running sources during the interruption.</p>
+    <p class="note">Peer rates count results sampled and returned during the outage.
+      Queue measurements cover the outage and include any frames already queued at its start.
+      Retries and recovery times follow the listed fixture order.</p>
     <h3 id="soak-heading">Soak frame counts</h3>
     <div class="table-wrap" role="region" aria-labelledby="soak-heading" tabindex="0">
       <table aria-labelledby="soak-heading">
