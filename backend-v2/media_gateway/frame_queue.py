@@ -1,9 +1,9 @@
 """Bounded handoff from trusted frame samplers to inference dispatchers."""
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
-from threading import Lock
+from threading import RLock
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +18,7 @@ class SampledFrame:
     sample_interval: float | None = None
     width: int | None = None
     height: int | None = None
+    assignment_epoch: int | None = None
 
 
 class FrameQueue:
@@ -31,7 +32,22 @@ class FrameQueue:
         self._max_frame_bytes = max_frame_bytes
         self._pending: OrderedDict[str, SampledFrame] = OrderedDict()
         self._pending_bytes = 0
-        self._lock = Lock()
+        self._lock = RLock()
+        self._assignment_guard = None
+
+    def bind_assignments(self, guard):
+        with self._lock:
+            if self._assignment_guard is not None:
+                raise ValueError('Frame queue already has an assignment guard')
+            self._assignment_guard = guard
+            self._pending.clear()
+            self._pending_bytes = 0
+
+    def discard(self, camera_id: str) -> None:
+        with self._lock:
+            frame = self._pending.pop(camera_id, None)
+            if frame is not None:
+                self._pending_bytes -= len(frame.data)
 
     def offer(self, frame: SampledFrame) -> bool:
         """Return false when the incoming frame cannot fit without evicting another camera."""
@@ -42,6 +58,11 @@ class FrameQueue:
             return False
 
         with self._lock:
+            if self._assignment_guard is not None:
+                epoch = self._assignment_guard(frame.camera_id)
+                if epoch is None or (frame.assignment_epoch is not None and frame.assignment_epoch != epoch):
+                    return False
+                frame = replace(frame, assignment_epoch=epoch)
             previous = self._pending.get(frame.camera_id)
             if previous is None and len(self._pending) >= self._max_cameras:
                 return False

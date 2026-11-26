@@ -133,6 +133,35 @@ class PlatformAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class GatewayPrincipal(Base):
+    __tablename__ = 'gateway_principals'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey('organizations.id'))
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GatewayCameraScope(Base):
+    __tablename__ = 'gateway_camera_scopes'
+
+    principal_id: Mapped[str] = mapped_column(ForeignKey('gateway_principals.id'), primary_key=True)
+    camera_id: Mapped[str] = mapped_column(ForeignKey('cameras.id', ondelete='CASCADE'), primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey('sites.id', ondelete='CASCADE'))
+
+
+class GatewayCredential(Base):
+    __tablename__ = 'gateway_credentials'
+    __table_args__ = (CheckConstraint('expires_at > issued_at', name='valid_expiry'),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    principal_id: Mapped[str] = mapped_column(ForeignKey('gateway_principals.id'), index=True)
+    audience: Mapped[str] = mapped_column(String(64))
+    secret_sha256: Mapped[str] = mapped_column(String(64))
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class CameraModelAssignment(Base):
     __tablename__ = 'camera_model_assignments'
     camera_id: Mapped[str] = mapped_column(ForeignKey('cameras.id', ondelete='CASCADE'), primary_key=True)

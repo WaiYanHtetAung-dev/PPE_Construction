@@ -30,7 +30,7 @@ def browser():
 def media():
     run('-m', 'unittest', '-v', 'tests.test_frame_queue', 'tests.test_media_sampler',
         'tests.media_decoder_integration', 'tests.test_inference_dispatch',
-        'tests.media_inference_integration')
+        'tests.media_inference_integration', 'tests.media_assignment_integration')
 
 
 def postgres():
@@ -65,7 +65,7 @@ def postgres():
     os.environ['PPE_DISPOSABLE_POSTGRES_URL'] = os.environ['DATABASE_URL']
     run('-m', 'pytest', '-q', 'tests/test_platform_models.py', 'tests/test_camera_models.py',
         'tests/test_model_verification.py', 'tests/test_inference_worker.py',
-        'tests/test_incident_ingestion.py', '-k', 'postgres')
+        'tests/test_incident_ingestion.py', 'tests/test_assignment_snapshot.py', '-k', 'postgres')
 
 
 if __name__ == '__main__':

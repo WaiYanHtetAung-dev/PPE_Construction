@@ -1,5 +1,7 @@
 """Dispatch bounded sampled frames to the authenticated inference v1 worker."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -11,6 +13,7 @@ from datetime import datetime
 from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
@@ -20,6 +23,9 @@ from app.contracts.inference import FrameRef, InferenceRequest, InferenceRespons
 from inference_worker.contract import INFERENCE_PATH
 from media_gateway.frame_queue import FrameQueue, SampledFrame
 from media_gateway.video_source import MAX_HEIGHT, MAX_WIDTH
+
+if TYPE_CHECKING:
+    from media_gateway.assignment_resolver import AssignmentResolver
 
 logger = logging.getLogger(__name__)
 MAX_RESPONSE_BYTES = 512 * 1024
@@ -94,6 +100,7 @@ class InferenceResult:
     assignment: CameraAssignment
     frame: FrameAttribution
     response: InferenceResponse
+    assignment_epoch: int | None = None
 
 
 class DispatchError(Exception):
@@ -105,7 +112,7 @@ class DispatchError(Exception):
 class InferenceDispatcher:
     """One in-flight request. Drop failed frames and let the next sample proceed."""
 
-    def __init__(self, queue: FrameQueue, assignments: Mapping[str, CameraAssignment], frame_root: Path,
+    def __init__(self, queue: FrameQueue, assignments: Mapping[str, CameraAssignment] | AssignmentResolver, frame_root: Path,
                  *, worker_origin: str, token: str, timeout: float = 5,
                  transport: httpx.AsyncBaseTransport | None = None):
         origin = httpx.URL(worker_origin)
@@ -117,7 +124,10 @@ class InferenceDispatcher:
         if not isfinite(timeout) or timeout <= 0:
             raise ValueError('Invalid inference deadline')
 
-        self._assignments = dict(assignments)
+        self._resolver = None if isinstance(assignments, Mapping) else assignments
+        self._assignments = dict(assignments) if self._resolver is None else {}
+        if self._resolver is not None and not self._resolver.owns_queue(queue):
+            raise ValueError('Assignment resolver must own the dispatch queue')
         if any(key != str(value.camera_id) for key, value in self._assignments.items()):
             raise ValueError('Assignment key must match its camera ID')
         self._frames = frame_root.resolve(strict=True) / 'frames'
@@ -168,7 +178,15 @@ class InferenceDispatcher:
 
             request_id, frame_id = uuid4(), uuid4()
             try:
-                assignment = self._assignments.get(sample.camera_id)
+                if self._resolver is not None:
+                    active = self._resolver.current(sample.camera_id, sample.assignment_epoch)
+                    if sample.assignment_epoch is None or active is None:
+                        raise DispatchError('assignment_invalidated')
+                    assignment = active.assignment
+                else:
+                    if sample.assignment_epoch is not None:
+                        raise DispatchError('assignment_invalidated')
+                    assignment = self._assignments.get(sample.camera_id)
                 if assignment is None:
                     raise DispatchError('unknown_camera')
                 frame = FrameAttribution.from_sample(sample)
@@ -182,6 +200,10 @@ class InferenceDispatcher:
                 )
                 try:
                     with self._stage(sample, name):
+                        if self._resolver is not None and self._resolver.current(
+                            sample.camera_id, sample.assignment_epoch,
+                        ) is None:
+                            raise DispatchError('assignment_invalidated')
                         async with asyncio.timeout(self._timeout):
                             result = await self._infer(request, assignment)
                 except (TimeoutError, httpx.TimeoutException):
@@ -190,6 +212,10 @@ class InferenceDispatcher:
                     raise DispatchError('worker_failure') from None
                 except OSError:
                     raise DispatchError('frame_storage') from None
+                if self._resolver is not None and self._resolver.current(
+                    sample.camera_id, sample.assignment_epoch,
+                ) is None:
+                    raise DispatchError('assignment_invalidated')
             except DispatchError as error:
                 logger.warning('inference_dispatch_failed', extra={
                     'correlation_id': str(request_id), 'reason': error.code,
@@ -197,7 +223,7 @@ class InferenceDispatcher:
                 raise
 
             logger.info('inference_dispatch_succeeded', extra={'correlation_id': str(request_id)})
-            return InferenceResult(assignment, frame, result)
+            return InferenceResult(assignment, frame, result, sample.assignment_epoch)
 
     async def _infer(self, request: InferenceRequest, assignment: CameraAssignment) -> InferenceResponse:
         async with self._client.stream('POST', INFERENCE_PATH, json=request.model_dump(mode='json')) as response:

@@ -105,19 +105,39 @@ outside the verified-worker path.
 
 ### Phase 4 control-plane camera assignment sync
 
-**PENDING APPROVAL.** The [ADR-009 final proposal](../DECISIONS.md#adr-009-proposal--workload-scoped-camera-assignment-snapshots)
-defines the proposed workload credential, atomic assignment and eligibility
-read, and 5 s poll / 2 s deadline / 10 s lifetime pilot policy. The media
-dispatcher still receives trusted bindings from its caller. Existing admin and
-worker regression tests can validate their independent behavior with synthetic
-data. No live assignment
-refresh, cross-boundary queue invalidation, or revocation propagation test is
-available until the approved contract is implemented.
+The [approved ADR-009](../DECISIONS.md#adr-009-proposal--workload-scoped-camera-assignment-snapshots)
+defines workload credentials, atomic assignment/evidence reads, and the 5 s
+poll / 2 s deadline / 10 s lifetime pilot policy. The private entry point is
+`app.assignment_snapshot:from_environment`. The listener reads a PostgreSQL DSN
+from `ASSIGNMENT_DATABASE_URL_FILE`. Provision a dedicated database login with
+only `SELECT` on `public.gateway_snapshot_credentials` and
+`public.gateway_snapshot_assignments`. The application creates read-only DB
+transactions. Keep the listener on a private network behind HTTPS. Apply
+Alembic revision `4e29c61bd0fa` in the disposable PostgreSQL test environment.
+
+`app.scripts.gateway_credentials` exposes transactional `provision`, `rotate`
+and `revoke` operator primitives. A separate login in the deployment-provisioned
+`ppe_assignment_operator` group needs access to the gateway tables, scoped
+camera/site lookup columns and platform audit inserts. Keep this trusted
+operator outside gateway and listener runtimes. Call the primitives in a
+transaction and transfer the returned token to a protected secret store after
+commit. Rotation retains at most one previous active credential with expiry
+clipped to five minutes. Never log bearer tokens or database URLs.
+
+Bind an `AssignmentResolver` to the frame queue and pass the same resolver to
+`InferenceDispatcher`. Start the resolver's `run()` task alongside samplers.
+The resolver applies expiry and revocation fences before queue admission, at
+send and before returning a result. Consumers that await or queue results
+after return must recheck `resolver.current(camera_id, result.assignment_epoch)`
+at actual emission. Linux uses the suspend-inclusive `CLOCK_BOOTTIME` clock.
+Other platforms require an explicit clock with equivalent behavior. Synthetic
+tests use a fake clock. No live revocation latency or throughput is measured.
 
 From `backend-v2`, run the current-boundary regression checks with:
 
 ```text
 python -m pytest -q tests/test_api.py tests/test_camera_models.py tests/test_model_catalog.py tests/test_model_verification.py tests/test_inference_worker.py
+python -m pytest -q tests/test_assignment_snapshot.py
 python scripts/ci_checks.py media
 python scripts/check_architecture.py
 python scripts/verify_contracts.py
@@ -127,7 +147,9 @@ Windows D: validation reported 19 passes and 24 skips for the focused backend
 tests, and 17 passes and two POSIX skips for the media suite. The focused backend
 skips require POSIX file handling or a disposable PostgreSQL service. The
 architecture and snapshot checks passed. GitHub and GitLab use the existing
-shared backend and PostgreSQL jobs for the additional regressions.
+shared backend and PostgreSQL jobs for these checks. Gateway integration tests
+use mocked snapshot and inference transports to force races. The media suite
+additionally runs the existing independent real ONNX worker checks on Linux.
 
 ## Design decisions and prerequisites
 

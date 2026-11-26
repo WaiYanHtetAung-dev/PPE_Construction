@@ -28,8 +28,9 @@ Phase 2 acceptance evidence is pending. See [P2-01 through P2-08](../tests/specs
 
 ## ADR-009 proposal — Workload-scoped camera assignment snapshots
 
-**Status:** Final proposal, **PENDING PROJECT OWNER APPROVAL**. Stop before
-implementing the endpoint, provisioning credentials or wiring a resolver.
+**Status:** **APPROVED** by the project owner for implementation and synthetic
+testing. Production credential provisioning, live CCTV and deployment require
+separate authorization.
 
 ### Current boundaries
 
@@ -48,7 +49,7 @@ implementing the endpoint, provisioning credentials or wiring a resolver.
   existing evidence rules. Assignment revision alone is insufficient to order
   eligibility changes.
 
-### Decision proposed for approval
+### Approved decision
 
 Use one private, read-only control-plane snapshot operation per camera.
 Keep registration and writes on the existing ADR-004 admin APIs. A separate
@@ -93,7 +94,7 @@ until the pilot shows that polling needs replacement.
   credentials out of the gateway. Suppress request bodies, credential headers,
   exception bodies, SQL parameter values and detailed auth failures in logs.
 
-### Snapshot API v1 proposal
+### Snapshot API v1
 
 `POST /internal/v1/camera-assignment-snapshots` is read-only in effect. POST
 keeps the request nonce and resource tuple in a typed JSON body. Require explicit
@@ -236,12 +237,12 @@ polling and assert that the original lease denies sends and emissions at
 `t=10`. Also test evidence with less than 2 s left at issue so a response may
 arrive before the request deadline and still be too late to use.
 
-Proposed files after approval:
+Implementation files:
 
 - `backend-v2/app/assignment_snapshot.py` and
   `backend-v2/app/contracts/assignment_snapshot.py` for the private listener
-  and typed schema. Add separately reviewed Alembic credential/scope storage
-  and role grants if required by the approved provisioning design.
+  and typed schema, with migration `4e29c61bd0fa` for gateway credentials,
+  camera scope and the read projections.
 - `backend-v2/media_gateway/assignment_resolver.py`, `frame_queue.py`, and
   `inference_dispatch.py` for refresh, epoch binding and result fencing.
 - `backend-v2/tests/test_assignment_snapshot.py` and
@@ -249,13 +250,12 @@ Proposed files after approval:
   through `backend-v2/scripts/ci_checks.py` and record results in the media
   phase documentation.
 
-### Items for explicit owner approval
+### Approval and rollback
 
-Approve the private listener, PostgreSQL projection and role boundaries;
-scoped identity, credential lifecycle and operator audit; v1 schema and
-negative statuses; pilot timing and documented guarantee assumptions;
-cross-camera revoke/reverify ordering and queue/in-flight policy. Approval
-covers implementation and synthetic tests only. If rolled back, disable the
+The owner approved the private listener, PostgreSQL projection and role
+boundaries, scoped identity and credential lifecycle, v1 schema and negative
+statuses, pilot timing assumptions and queue/revocation policy for implementation
+and synthetic tests. If rolled back, disable the
 new listener and revoke its keys. Keep existing assignments and history, and
 require fresh authorization before resuming gateway dispatch.
 
