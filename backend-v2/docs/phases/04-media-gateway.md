@@ -243,6 +243,22 @@ numeric measurements and generated fixture labels. The Backend V2 GitHub job
 uploads the HTML after the stack test passes. A capable GitLab runner can
 generate the same file with the shared command.
 
+`PPE_STACK_RECONNECT_SOAK` exercises six interruptions at the 0.3 s candidate
+interval. Each of the three continuously paced sources hits one injected EOF
+and one stalled read at the source boundary. Each outage remains active for at
+least two unsuccessful reconnect attempts and two fresh results per peer
+camera. An existing queued or in-flight frame sampled before the interruption
+may finish. Recovery requires a new source epoch and a sample captured after
+the source becomes available. There are five healthy seconds before the first
+fault and after each recovery. Test-only read and retry settings are a 2 s
+deadline and 0.5–1.0 s backoff. The run has a 100 s deadline.
+
+The HTML report includes the per-cycle outage and recovery timings and the
+per-camera soak counts. The harness accounts for every offered sample as an
+emitted result, replacement, rejection, purge, or work remaining at shutdown.
+The source faults are injected around actual local-video replay. Network and
+RTSP recovery require separate testing.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.

@@ -42,6 +42,7 @@ from media_gateway.sampler import sample_camera
 from media_gateway.video_source import local_video_source
 from tests.media_decoder_integration import HEIGHT, WIDTH, generate_clip
 from tests.synthetic_pilot_report import render_report
+from tests.synthetic_reconnect_soak import run_reconnect_soak
 from tests.synthetic_stack_support import listener, paced_video, readonly_bind, temporary_tls, wait_for, worker_process
 from tests.test_onnx_cpu import fixture_graph
 from tests.test_model_verification import role_connections
@@ -500,6 +501,8 @@ async def verify_stack(stack, root, owner, context, control_url, worker, worker_
             print('PPE_STACK_SAMPLING ' + json.dumps(trial, sort_keys=True))
     summary = summarize_sampling_trials(trials)
     print('PPE_STACK_SAMPLING_BLOCKS ' + json.dumps(summary, sort_keys=True))
+    reconnect = await run_reconnect_soak(resolver, dispatcher, queue, paths)
+    print('PPE_STACK_RECONNECT_SOAK ' + json.dumps(reconnect, sort_keys=True))
     transport = httpx.AsyncHTTPTransport(verify=context, trust_env=False,
                                          limits=httpx.Limits(max_keepalive_connections=0))
     async with InferenceDispatcher(queue, resolver, frames_source, worker_origin=worker_url,
@@ -507,7 +510,7 @@ async def verify_stack(stack, root, owner, context, control_url, worker, worker_
         restart = await verify_worker_restart(worker, resolver, probe, queue, paths, frames_source / 'frames')
     assert list((frames_source / 'frames').iterdir()) == []
     if report := os.getenv('PPE_STACK_REPORT'):
-        Path(report).write_text(render_report(trials, summary, restart), encoding='utf-8')
+        Path(report).write_text(render_report(trials, summary, restart, reconnect), encoding='utf-8')
 
 
 async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, staged):

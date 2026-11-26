@@ -3,7 +3,7 @@
 from statistics import median
 
 
-def render_report(trials, summary, restart):
+def render_report(trials, summary, restart, reconnect):
     interval = restart['sample_interval_s']
     windows = [trial for trial in trials if trial['sample_interval_s'] == interval]
     camera_windows = zip(*(trial['cameras'] for trial in windows), strict=True)
@@ -26,6 +26,19 @@ def render_report(trials, summary, restart):
           <td>{arm['total_emitted']:d}</td><td>{arm['total_replacements']:d}</td></tr>'''
         for arm in summary['arms']
     )
+    mode_labels = {'eof': 'End of stream', 'stall': 'Frame stall'}
+    reconnect_rows = ''.join(
+        f'''<tr><th scope="row">Camera {row['camera']:d}</th><td>{mode_labels[row['mode']]}</td>
+          <td>{row['source_offline_s']:.3f}</td><td>{row['blocked_retries']:d}</td>
+          <td>{row['unaffected_results']:d}</td><td>{row['restore_to_result_s']:.3f}</td></tr>'''
+        for row in reconnect['cycles']
+    )
+    soak_rows = ''.join(
+        f'''<tr><th scope="row">Camera {row['camera']:d}</th><td>{row['offered']:d}</td>
+          <td>{row['emitted']:d}</td><td>{row['replaced']:d}</td><td>{row['rejected']:d}</td><td>{row['purged']:d}</td>
+          <td>{row['pending_at_shutdown']:d}</td><td>{row['in_flight_at_shutdown']:d}</td></tr>'''
+        for row in reconnect['cameras']
+    )
 
     return f'''<!doctype html>
 <html lang="en">
@@ -41,6 +54,7 @@ def render_report(trials, summary, restart):
   h1, h2, p {{ margin: 0 0 .6rem; }}
   h1 {{ font-size: clamp(1.75rem, 4vw, 2.75rem); line-height: 1.15; letter-spacing: -.035em; }}
   h2 {{ font-size: 1.3rem; }}
+  h3 {{ font-size: 1.1rem; margin: 1rem 0 .6rem; }}
   p, small {{ color: #435c65; }}
   small {{ display: block; font-size: .8rem; font-weight: normal; }}
   dl {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; margin: 1.5rem 0; }}
@@ -91,6 +105,28 @@ def render_report(trials, summary, restart):
       </table>
     </div>
     <p class="note">The balanced comparison and the worker restart are separate exercises in the same synthetic run.</p>
+  </section>
+  <section aria-labelledby="reconnect-heading">
+    <h2 id="reconnect-heading">Source reconnect soak</h2>
+    <p>{reconnect['elapsed_s']:.1f} s at {interval:.1f} s sampling with one interrupted source per cycle.</p>
+    <div class="table-wrap" role="region" aria-labelledby="reconnect-heading" tabindex="0">
+      <table aria-labelledby="reconnect-heading">
+        <thead><tr><th scope="col">Fixture</th><th scope="col">Interruption</th><th scope="col">Offline (s)</th>
+          <th scope="col">Blocked retries</th><th scope="col">Peer results</th>
+          <th scope="col">Restore to result (s)</th></tr></thead>
+        <tbody>{reconnect_rows}</tbody>
+      </table>
+    </div>
+    <p class="note">Peer results use fresh samples from the two running sources during the interruption.</p>
+    <h3 id="soak-heading">Soak frame counts</h3>
+    <div class="table-wrap" role="region" aria-labelledby="soak-heading" tabindex="0">
+      <table aria-labelledby="soak-heading">
+        <thead><tr><th scope="col">Fixture</th><th scope="col">Offered</th><th scope="col">Results</th>
+          <th scope="col">Replaced</th><th scope="col">Rejected</th><th scope="col">Purged</th>
+          <th scope="col">Queued at shutdown</th><th scope="col">In flight at shutdown</th></tr></thead>
+        <tbody>{soak_rows}</tbody>
+      </table>
+    </div>
   </section>
 </main>
 </body>
