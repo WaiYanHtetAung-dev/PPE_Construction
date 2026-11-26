@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime
 from threading import Lock
 
 
@@ -9,6 +10,14 @@ from threading import Lock
 class SampledFrame:
     camera_id: str
     data: bytes
+    received_at: datetime | None = None
+    source_timestamp: float | None = None
+    source_frame_index: int | None = None
+    source_epoch: int | None = None
+    sampled_monotonic: float | None = None
+    sample_interval: float | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class FrameQueue:

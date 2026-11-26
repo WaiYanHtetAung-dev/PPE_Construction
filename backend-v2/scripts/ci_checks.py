@@ -27,6 +27,11 @@ def browser():
     run('-m', 'pytest', '-q', 'tests/browser_smoke.py')
 
 
+def media():
+    run('-m', 'unittest', '-v', 'tests.test_frame_queue', 'tests.test_media_sampler',
+        'tests.media_decoder_integration')
+
+
 def postgres():
     from sqlalchemy import create_engine, text
     from sqlalchemy.engine import make_url
@@ -64,6 +69,6 @@ def postgres():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('check', choices=('backend', 'browser', 'postgres'))
+    parser.add_argument('check', choices=('backend', 'browser', 'media', 'postgres'))
     check = parser.parse_args().check
-    {'backend': backend, 'browser': browser, 'postgres': postgres}[check]()
+    {'backend': backend, 'browser': browser, 'media': media, 'postgres': postgres}[check]()

@@ -8,8 +8,9 @@ backend-validation:
   timeout: 15m
   script:
     - cd backend-v2
-    - python -m pip install -r requirements-dev.txt -r requirements-inference-cpu.txt
+    - python -m pip install -r requirements-dev.txt -r requirements-inference-cpu.txt -r requirements-media-test.txt
     - python scripts/ci_checks.py backend
+    - python scripts/ci_checks.py media
 
 postgres-integration:
   stage: test

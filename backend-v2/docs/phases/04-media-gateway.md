@@ -1,6 +1,6 @@
 # Phase 4 — RTSP ingest, frame sampling, camera health and AI integration
 
-**Status:** Bounded handoff, source sampling and reconnect logic implemented. Real RTSP decoding, live camera health and inference integration remain planned.
+**Status:** Bounded handoff, source sampling, reconnect logic and synthetic MP4 decoding implemented. RTSP, live camera health and inference integration remain planned.
 
 ## Scope and deliverables
 
@@ -23,8 +23,36 @@ adapters own connection setup and cleanup and must bound their own setup time.
 `python -m unittest tests.test_media_sampler` exercises synthetic disconnect,
 stall, reconnect and cancellation paths. It also runs one, two and three
 simultaneous synthetic samplers and checks camera attribution and shutdown.
-These fixtures emit decoded bytes in process. RTSP, inference and end-to-end
-pilot acceptance require additional tests.
+These unit fixtures emit decoded bytes in process.
+
+### Synthetic video decoder integration
+
+`local_video_source` launches a PyAV/FFmpeg child process for trusted local MP4
+fixtures. It passes decoded RGB24 frames and presentation timestamps through a
+bounded pipe. The sampler retains camera ID, dimensions, frame index, receive
+time (UTC), monotonic sampling time, configured interval and reconnect epoch.
+Presentation timestamps are strictly ordered within an epoch. Reopening a file
+starts a new epoch with its own timestamp origin. Fixture playback is unpaced;
+sampling uses media time, so the test does not measure live camera throughput.
+
+Generate fixtures only in a disposable test directory. They contain visible
+frame counters and presentation time markers at 10, 24 and 30 FPS. Tests check
+0.2-second sampling within one source-frame period, concurrent attribution,
+corrupt input, EOF reconnect, timeout recovery and child-process cleanup.
+The MP4 demuxer uses a local file handle with external data references disabled.
+No live input or model is required.
+
+From `backend-v2` in the workspace Python environment, run:
+
+```text
+python -m pip install -r requirements-media-test.txt
+python scripts/ci_checks.py media
+```
+
+On Windows, point `TEMP` and `TMP` at an ignored D: workspace directory before
+running so fixture files stay on D:. Both CI providers call the same command.
+GitLab runner execution remains **NOT TESTED**. RTSP, inference and end-to-end
+pilot acceptance require separate tests.
 
 ## Design decisions and prerequisites
 
