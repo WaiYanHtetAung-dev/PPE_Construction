@@ -163,3 +163,28 @@ def test_switch_organization_and_handle_unauthorized(smoke_origin, admin_account
         page.get_by_role('button', name='Refresh data').click()
         expect(page.get_by_role('heading', name='PPE V2 Sign In')).to_be_visible()
         expect(page.get_by_role('alert')).to_have_text('Your session has ended. Sign in again.')
+
+
+def test_session_expiry_clears_dashboard_without_an_api_error(smoke_origin, admin_account):
+    with sync_playwright() as playwright, closing(playwright.chromium.launch()) as browser:
+        page = browser.new_page()
+        page.clock.install()
+        page.goto(smoke_origin)
+        page.get_by_label('Email').fill(admin_account['email'])
+        page.get_by_label('Password').fill(admin_account['password'])
+        with page.expect_response(f'{smoke_origin}/api/v1/auth/login') as login:
+            page.get_by_role('button', name='Sign in').click()
+        assert login.value.status == 200
+        expiration = login.value.json()['expires_at']
+        camera = page.get_by_text('Smoke Test Camera', exact=True).first
+        expect(camera).to_be_visible()
+
+        remaining = page.evaluate('(expiration) => Date.parse(expiration) - Date.now()', expiration)
+        assert remaining > 0
+        page.clock.fast_forward(int(remaining) + 1000)
+
+        expect(page.get_by_role('heading', name='PPE V2 Sign In')).to_be_visible()
+        expect(page.get_by_role('alert')).to_have_text('Your session has ended. Sign in again.')
+        expect(camera).to_have_count(0)
+        expect(page.get_by_text('smoke-violation', exact=True)).to_have_count(0)
+        expect(page.get_by_label('Password')).to_have_value('')
