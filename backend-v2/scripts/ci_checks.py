@@ -73,17 +73,25 @@ def postgres():
         'tests/test_incident_ingestion.py', 'tests/test_assignment_snapshot.py', '-k', 'postgres')
 
 
-def stack():
+def stack(report=None):
     disposable_postgres_url()
     if sys.platform != 'linux':
         raise SystemExit('The integrated stack requires Linux POSIX reads and read-only bind mounts')
     os.environ['PPE_DISPOSABLE_POSTGRES_URL'] = os.environ['DATABASE_URL']
     os.environ['PPE_STACK_RUN'] = '1'
+    if report is not None:
+        os.environ['PPE_STACK_REPORT'] = str(report.resolve())
     run('-m', 'pytest', '-q', '-s', 'tests/synthetic_assignment_stack.py')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('check', choices=('backend', 'browser', 'media', 'postgres', 'stack'))
-    check = parser.parse_args().check
-    {'backend': backend, 'browser': browser, 'media': media, 'postgres': postgres, 'stack': stack}[check]()
+    parser.add_argument('--report', type=Path, help='Write a standalone HTML report for the synthetic stack')
+    args = parser.parse_args()
+    if args.check == 'stack':
+        stack(args.report)
+    elif args.report is not None:
+        parser.error('--report requires the stack check')
+    else:
+        {'backend': backend, 'browser': browser, 'media': media, 'postgres': postgres}[args.check]()

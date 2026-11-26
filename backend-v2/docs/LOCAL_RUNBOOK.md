@@ -52,6 +52,28 @@ stop and restart while three synthetic cameras keep sampling. See the
 [disposable stack prerequisites](phases/04-media-gateway.md#disposable-https-stack-acceptance)
 for Linux runner setup.
 
+## Synthetic pilot diagnostics in a browser
+
+Open a successful **Backend V2 CI (monorepo)** run and download
+**synthetic-pilot-diagnostics** from the run's Artifacts section. Extract the
+ZIP into the workspace (for example under `.venv`) and open
+`synthetic-pilot.html` in a browser. The report shows per-camera decoded FPS,
+sampling and result rates, frame drops, and time to the first fresh result
+after restarting the synthetic worker. It opens directly from disk.
+
+On a disposable Linux runner with the stack prerequisites, generate the same
+report from `backend-v2`:
+
+```bash
+mkdir -p ../.venv
+python scripts/ci_checks.py postgres
+python scripts/ci_checks.py stack --report ../.venv/synthetic-pilot.html
+```
+
+GitHub retains the HTML artifact for 14 days.
+
+## Browser CI
+
 In GitHub Actions, `.github/workflows/frontend-v2-ci.yml` runs the existing
 frontend checks first. The browser steps run from `backend-v2` on Ubuntu:
 

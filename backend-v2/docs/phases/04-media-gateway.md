@@ -234,6 +234,15 @@ camera sampled after TLS readiness and verifies that the active assignment
 revisions and model verification generations stay the same. The candidate
 interval and shortened deadline apply to this test only.
 
+Pass `--report PATH` to the shared stack command to write these measurements to
+a standalone HTML page. It shows the 0.3 s per-camera window medians, totals
+for pending frame replacements, policy rejections and queue purges, and time
+to the first fresh result per camera. The page also compares 0.2/0.3/0.4 s
+result counts and replacements across the balanced windows. It includes only
+numeric measurements and generated fixture labels. The Backend V2 GitHub job
+uploads the HTML after the stack test passes. A capable GitLab runner can
+generate the same file with the shared command.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.

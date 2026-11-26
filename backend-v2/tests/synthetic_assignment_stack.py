@@ -41,6 +41,7 @@ from media_gateway.inference_dispatch import DispatchError, InferenceDispatcher
 from media_gateway.sampler import sample_camera
 from media_gateway.video_source import local_video_source
 from tests.media_decoder_integration import HEIGHT, WIDTH, generate_clip
+from tests.synthetic_pilot_report import render_report
 from tests.synthetic_stack_support import listener, paced_video, readonly_bind, temporary_tls, wait_for, worker_process
 from tests.test_onnx_cpu import fixture_graph
 from tests.test_model_verification import role_connections
@@ -497,13 +498,16 @@ async def verify_stack(stack, root, owner, context, control_url, worker, worker_
             trial.update(block=block, position=position)
             trials.append(trial)
             print('PPE_STACK_SAMPLING ' + json.dumps(trial, sort_keys=True))
-    print('PPE_STACK_SAMPLING_BLOCKS ' + json.dumps(summarize_sampling_trials(trials), sort_keys=True))
+    summary = summarize_sampling_trials(trials)
+    print('PPE_STACK_SAMPLING_BLOCKS ' + json.dumps(summary, sort_keys=True))
     transport = httpx.AsyncHTTPTransport(verify=context, trust_env=False,
                                          limits=httpx.Limits(max_keepalive_connections=0))
     async with InferenceDispatcher(queue, resolver, frames_source, worker_origin=worker_url,
                                    token=worker_secret, transport=transport, timeout=1.5) as probe:
-        await verify_worker_restart(worker, resolver, probe, queue, paths, frames_source / 'frames')
+        restart = await verify_worker_restart(worker, resolver, probe, queue, paths, frames_source / 'frames')
     assert list((frames_source / 'frames').iterdir()) == []
+    if report := os.getenv('PPE_STACK_REPORT'):
+        Path(report).write_text(render_report(trials, summary, restart), encoding='utf-8')
 
 
 async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, staged):
@@ -521,6 +525,7 @@ async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, stag
 
     async def results_by_camera():
         rows = {}
+        first_result_at = {}
         async with asyncio.timeout(8):
             while len(rows) < len(paths):
                 row = await dispatcher.dispatch_one()
@@ -531,8 +536,10 @@ async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, stag
                 active = resolver.current(camera, row.assignment_epoch)
                 assert camera in paths and active and row.assignment == active.assignment
                 assert row.frame.sample_interval == interval
-                rows[camera] = row
-        return rows
+                if camera not in rows:
+                    rows[camera] = row
+                    first_result_at[camera] = clock()
+        return rows, first_result_at
 
     active_before = assignments()
     clock = asyncio.get_running_loop().time
@@ -544,7 +551,7 @@ async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, stag
         )) for (camera, path), fps in zip(paths.items(), (10, 24, 30), strict=True)]
         poll = group.create_task(resolver.run())
         try:
-            baseline = await results_by_camera()
+            baseline, _ = await results_by_camera()
             assert any(row.response.detections for row in baseline.values())
             await worker.stop()
             offers = queue.offers.copy()
@@ -563,8 +570,8 @@ async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, stag
             ready_at = clock()
             offers = queue.offers.copy()
             await wait_for(lambda: all(queue.offers[camera] > offers[camera] for camera in paths), 4)
-            recovered = await results_by_camera()
-            recovery_delay = clock() - restart_at
+            recovered, first_result_at = await results_by_camera()
+            recovery_delay = max(first_result_at.values()) - restart_at
             assert assignments() == active_before
             for camera, row in recovered.items():
                 before = baseline[camera]
@@ -578,13 +585,16 @@ async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, stag
                 task.cancel()
     while queue.take() is not None:
         pass
-    print('PPE_STACK_WORKER_RESTART ' + json.dumps({
+    result = {
         'sample_interval_s': interval, 'cameras_recovered': len(recovered),
         'outage_dispatch': 'timeout', 'outage_deadline_s': 1.5,
         'outage_dispatch_s': round(failure_delay, 3),
         'worker_tls_ready_s': round(ready_at - restart_at, 3),
         'restart_to_all_cameras_s': round(recovery_delay, 3),
-    }, sort_keys=True))
+        'restart_to_camera_s': [round(first_result_at[camera] - restart_at, 3) for camera in paths],
+    }
+    print('PPE_STACK_WORKER_RESTART ' + json.dumps(result, sort_keys=True))
+    return result
 
 
 def summarize_sampling_trials(trials):
