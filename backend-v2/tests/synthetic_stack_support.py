@@ -104,17 +104,34 @@ async def worker_process(cert, key, ca_file, settings, context):
         # Keep database and CI credentials outside the isolated worker process.
         env = {k: env[k] for k in ('PATH', 'PYTHONPATH', 'LD_LIBRARY_PATH') if k in env}
         env.update(settings, SSL_CERT_FILE=str(ca_file), PYTHONUNBUFFERED='1')
-        process = await asyncio.create_subprocess_exec(
-            sys.executable, '-B', '-m', 'uvicorn', 'inference_worker.service:from_environment',
-            '--factory', '--fd', str(sock.fileno()), '--ssl-keyfile', str(key), '--ssl-certfile', str(cert),
-            '--no-access-log', '--log-level', 'warning', '--no-proxy-headers',
-            pass_fds=(sock.fileno(),), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-        )
+        bootstrap = """
+import socket
+import sys
+import uvicorn
+
+fd, cert, key = sys.argv[1:]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM, fileno=int(fd)) as listener:
+    config = uvicorn.Config(
+        'inference_worker.service:from_environment', factory=True,
+        ssl_certfile=cert, ssl_keyfile=key, access_log=False,
+        proxy_headers=False, log_level='warning',
+    )
+    uvicorn.Server(config).run(sockets=[listener])
+"""
+        diagnostic = key.parent / 'worker-stderr.log'
+        with diagnostic.open('wb') as log:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, '-B', '-c', bootstrap, str(sock.fileno()), str(cert), str(key),
+                pass_fds=(sock.fileno(),), stdout=asyncio.subprocess.DEVNULL, stderr=log,
+            )
         sock.close()
         try:
             async with asyncio.timeout(12), httpx.AsyncClient(verify=context, trust_env=False, timeout=0.25) as client:
                 while True:
-                    assert process.returncode is None, 'Inference worker exited before becoming ready'
+                    if process.returncode is not None:
+                        # Bootstrap receives only ephemeral paths and no database or CI credentials.
+                        message = diagnostic.read_text(encoding='utf-8', errors='replace')[-2000:]
+                        raise AssertionError(f'Inference worker startup failed: {message}')
                     try:
                         if (await client.get(origin)).status_code == 404:
                             break
