@@ -97,13 +97,13 @@ async def listener(app, cert, key):
 
 
 @asynccontextmanager
-async def worker_process(cert, key, ca_file, settings, context):
+async def worker_process(cert, key, settings, context):
     with loopback_socket() as sock:
         origin = f'https://127.0.0.1:{sock.getsockname()[1]}'
         env = os.environ.copy()
         # Keep database and CI credentials outside the isolated worker process.
         env = {k: env[k] for k in ('PATH', 'PYTHONPATH', 'LD_LIBRARY_PATH') if k in env}
-        env.update(settings, SSL_CERT_FILE=str(ca_file), PYTHONUNBUFFERED='1')
+        env.update(settings, PYTHONUNBUFFERED='1')
         bootstrap = """
 import socket
 import sys
@@ -122,7 +122,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM, fileno=int(fd)) as listen
         with diagnostic.open('wb') as log:
             process = await asyncio.create_subprocess_exec(
                 sys.executable, '-B', '-c', bootstrap, str(sock.fileno()), str(cert), str(key),
-                pass_fds=(sock.fileno(),), stdout=asyncio.subprocess.DEVNULL, stderr=log,
+                env=env, pass_fds=(sock.fileno(),), stdout=asyncio.subprocess.DEVNULL, stderr=log,
             )
         sock.close()
         try:

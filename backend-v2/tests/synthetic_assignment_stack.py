@@ -224,7 +224,7 @@ async def exercise_stack(root):
                 path.touch(mode=0o600, exist_ok=False)
                 path.write_bytes(data)
                 settings[env] = str(path)
-            worker_url = await stack.enter_async_context(worker_process(cert, key, ca_file, settings, context))
+            worker_url = await stack.enter_async_context(worker_process(cert, key, settings, context))
             await verify_stack(stack, root, owner, context, control_url, worker_url, worker_secret, token,
                                principal, scopes, (model_a, model_b), frames_source, models_source, model_mount,
                                signer, availability, governance, admin_id)
