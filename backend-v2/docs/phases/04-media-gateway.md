@@ -208,19 +208,20 @@ window. Dispatcher occupancy is an observed condition, not a causal estimate
 of production inference capacity. Frames still queued at shutdown and
 in-flight responses discarded by the assignment fence are reported separately.
 
-The stack emits eight `PPE_STACK_SAMPLING` windows for sampling every 0.2 s
-and 0.4 s. Run four consecutive pairs with an alternating order: 0.2/0.4,
-0.4/0.2, 0.2/0.4 and 0.4/0.2. Each uses the same three paced inputs, model
-assignments, worker and queue limits. Each runs after a three-second warm-up and records
+The stack emits nine `PPE_STACK_SAMPLING` windows for sampling every 0.2 s,
+0.3 s and 0.4 s. Three blocks rotate the order so each interval appears once
+in each position: 0.2/0.3/0.4, 0.3/0.4/0.2 and 0.4/0.2/0.3. All windows use the
+same three paced inputs, model assignments, worker and queue limits. Each
+runs after a three-second warm-up and records
 12 seconds of steady-state measurements. The comparison has no test-imposed
 response hold, switch, or revocation. Per-camera sample age is wall-clock
 elapsed time from the sampler's monotonic timestamp through queueing, staging,
 HTTPS inference and response validation. It excludes decoding and source time.
 Record source FPS in each arm to expose decoder throughput variation.
-`PPE_STACK_SAMPLING_PAIRED` compares totals within each pair and reports
+`PPE_STACK_SAMPLING_BLOCKS` compares each interval against 0.2 s within its block and reports
 per-camera medians across windows. The age aggregate is the median of the
-window medians. These four pairs are evidence for a synthetic pilot choice;
-they do not estimate production latency or a confidence interval.
+window medians. These blocks are evidence for a synthetic pilot choice.
+Production latency and confidence intervals are outside the experiment.
 
 ## Design decisions and prerequisites
 

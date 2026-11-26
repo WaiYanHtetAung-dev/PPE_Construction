@@ -51,7 +51,8 @@ CLASS_MAP = {label: detection(i, 1.0, (1, 1, 2, 2)).class_key for i, label in en
 FRAME_BYTES = WIDTH * HEIGHT * 3
 REPEAT_CYCLES = 3
 SAMPLING_COMPARISON_SECONDS = 12
-SAMPLING_PAIR_ORDERS = ((0.2, 0.4), (0.4, 0.2), (0.2, 0.4), (0.4, 0.2))
+SAMPLING_INTERVALS = (0.2, 0.3, 0.4)
+SAMPLING_BLOCK_ORDERS = ((0.2, 0.3, 0.4), (0.3, 0.4, 0.2), (0.4, 0.2, 0.3))
 
 
 def owner_engine():
@@ -488,38 +489,47 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
                 revision=revision, paced=paced,
             )
     trials = []
-    for pair, order in enumerate(SAMPLING_PAIR_ORDERS, 1):
+    for block, order in enumerate(SAMPLING_BLOCK_ORDERS, 1):
         for position, interval in enumerate(order, 1):
             async with asyncio.timeout(30):
                 trial = await compare_sampling_interval(resolver, dispatcher, queue, paths, interval)
-            trial.update(pair=pair, position=position)
+            trial.update(block=block, position=position)
             trials.append(trial)
             print('PPE_STACK_SAMPLING ' + json.dumps(trial, sort_keys=True))
-    print('PPE_STACK_SAMPLING_PAIRED ' + json.dumps(summarize_sampling_trials(trials), sort_keys=True))
+    print('PPE_STACK_SAMPLING_BLOCKS ' + json.dumps(summarize_sampling_trials(trials), sort_keys=True))
     assert list((frames_source / 'frames').iterdir()) == []
 
 
 def summarize_sampling_trials(trials):
-    """Report paired effects and per-window medians without pooling unequal samples."""
+    """Compare each interval against 0.2 s within the same balanced block."""
     by_interval = {interval: [trial for trial in trials if trial['sample_interval_s'] == interval]
-                   for interval in (0.2, 0.4)}
-    pairs = zip(by_interval[0.2], by_interval[0.4], strict=True)
+                   for interval in SAMPLING_INTERVALS}
     metrics = ('emitted_fps', 'median_sample_to_result_ms', 'queue_replacements', 'source_fps')
 
     def sum_field(trial, field):
         return sum(camera[field] for camera in trial['cameras'])
 
-    return {
-        'pairs': [{
-            'pair': short['pair'], 'first_interval_s': 0.2 if short['position'] == 1 else 0.4,
-            'emitted_delta_04_minus_02': sum_field(long, 'emitted') - sum_field(short, 'emitted'),
-            'replacement_delta_04_minus_02':
-                sum_field(long, 'queue_replacements') - sum_field(short, 'queue_replacements'),
-            'sample_age_delta_ms_04_minus_02': [
-                round(long_camera['median_sample_to_result_ms'] - short_camera['median_sample_to_result_ms'], 2)
-                for short_camera, long_camera in zip(short['cameras'], long['cameras'], strict=True)
+    def delta(baseline, candidate):
+        return {
+            'interval_s': candidate['sample_interval_s'],
+            'emitted_delta': sum_field(candidate, 'emitted') - sum_field(baseline, 'emitted'),
+            'replacement_delta': sum_field(candidate, 'queue_replacements') - sum_field(baseline, 'queue_replacements'),
+            'sample_age_delta_ms': [
+                round(new['median_sample_to_result_ms'] - old['median_sample_to_result_ms'], 2)
+                for old, new in zip(baseline['cameras'], candidate['cameras'], strict=True)
             ],
-        } for short, long in pairs],
+        }
+
+    blocks = []
+    for block, order in enumerate(SAMPLING_BLOCK_ORDERS, 1):
+        windows = [trial for trial in trials if trial['block'] == block]
+        assert tuple(trial['sample_interval_s'] for trial in windows) == order
+        reference = next(trial for trial in windows if trial['sample_interval_s'] == 0.2)
+        blocks.append({'block': block, 'order_s': order,
+                       'deltas_from_02': [delta(reference, trial) for trial in windows if trial is not reference]})
+
+    return {
+        'blocks': blocks,
         'arms': [{
             'interval_s': interval, 'windows': len(arm),
             'total_emitted': sum(sum_field(trial, 'emitted') for trial in arm),
