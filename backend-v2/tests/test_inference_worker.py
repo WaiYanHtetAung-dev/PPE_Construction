@@ -219,6 +219,7 @@ def test_postgres_authority_grants_live_evidence_and_business_only_rollback():
     try:
         role, password = 'lease_' + uuid4().hex, uuid4().hex
         with owner.begin() as db:
+            migration_revision = db.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
             db.exec_driver_sql(f"CREATE ROLE {role} LOGIN PASSWORD '{password}'")
             db.exec_driver_sql(f'GRANT SELECT ON public.eligible_model_versions TO {role}')
             db.exec_driver_sql(f'GRANT SELECT (id,model_key,version,artifact_ref,artifact_sha256) ON public.model_versions TO {role}')
@@ -275,7 +276,7 @@ def test_postgres_authority_grants_live_evidence_and_business_only_rollback():
         finally:
             business_app.dependency_overrides.pop(get_db)
         with owner.connect() as db:
-            assert db.scalar(text('SELECT version_num FROM alembic_version')) == 'e5c19a74d620'
+            assert db.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == migration_revision
             assert db.scalar(select(CameraModelAssignment.model_version_id).where(
                 CameraModelAssignment.camera_id == camera,
             )) == model.id
