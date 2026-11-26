@@ -2,6 +2,7 @@
 
 import hmac
 import os
+import ssl
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -157,9 +158,11 @@ def from_environment() -> FastAPI:
     token = read_token(os.environ['ELIGIBILITY_TOKEN_FILE'])
     with Path(os.environ['INFERENCE_SIGNER_PUBLIC_KEY']).open('rb') as source:
         key = source.read(33)
+    ca_file = os.environ.get('ELIGIBILITY_AUTHORITY_CA_FILE')
+    verify = ssl.create_default_context(cafile=ca_file) if ca_file else True
     return create_worker(
         read_token(os.environ['INFERENCE_TOKEN_FILE']),
-        AuthorityClient(httpx.Client(base_url=url, follow_redirects=False, trust_env=False, timeout=2), token),
+        AuthorityClient(httpx.Client(base_url=url, follow_redirects=False, trust_env=False, timeout=2, verify=verify), token),
         mount(os.environ['INFERENCE_MODEL_ROOT'], os.environ['MODEL_ARTIFACT_NAMESPACE'],
               os.environ['INFERENCE_MAX_MODEL_BYTES']),
         mount(os.environ['INFERENCE_FRAME_ROOT'], os.environ['INFERENCE_FRAME_NAMESPACE'],

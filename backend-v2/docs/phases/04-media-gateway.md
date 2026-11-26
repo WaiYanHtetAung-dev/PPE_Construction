@@ -151,6 +151,37 @@ shared backend and PostgreSQL jobs for these checks. Gateway integration tests
 use mocked snapshot and inference transports to force races. The media suite
 additionally runs the existing independent real ONNX worker checks on Linux.
 
+### Disposable HTTPS stack acceptance
+
+`python scripts/ci_checks.py stack` runs the integrated suite from `backend-v2`
+after `python scripts/ci_checks.py postgres` has migrated and checked the
+disposable database. Install `requirements-dev.txt`,
+`requirements-inference-cpu.txt` and `requirements-media-test.txt`. The command
+validates the same disposable `APP_ENV=ci` / `ppe_ci` connection as the shared
+PostgreSQL job. It requires Linux and a runner with permission to create two
+read-only bind mounts beneath its temporary directory (root with mount
+capability, or passwordless `sudo -n mount/umount`). Missing mount capability
+fails the selected acceptance job. GitLab can use this command on a dedicated
+capable runner; the standard GitLab container job does not invoke it.
+
+The harness serves assignment and eligibility FastAPI apps on ephemeral
+loopback HTTPS ports and starts the verified ONNX worker as a separate
+subprocess. All listeners trust a generated test CA through explicit TLS
+configuration. The worker uses `ELIGIBILITY_AUTHORITY_CA_FILE` for that CA and
+receives no DB or CI credentials. The listener and authority receive distinct
+read-only database roles. Generated video, ONNX graphs, manifests and runtime
+secrets are held in a temporary directory. The gateway writes frames through
+one alias, while the worker reads them and the signed model artifacts through
+read-only mounts. Listeners, mounts and files are cleaned up by the harness;
+the CI job owns and tears down its PostgreSQL service.
+
+The test reports `PPE_STACK_METRICS` with elapsed switch, revoke, timeout and
+recovery observations and inference header latency. It also reports offered
+samples and pre-dispatch losses (including saturation, replacement and policy
+discard). The 5/2/10 s policy and fake-clock tests remain the reference for
+boundary behavior. A single loopback run provides synthetic evidence; live
+camera throughput and cross-site revocation timing remain **NOT TESTED**.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.
