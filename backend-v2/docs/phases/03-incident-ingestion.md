@@ -1,6 +1,6 @@
 # Phase 3 — Secure inference result ingestion and incident lifecycle
 
-**Status:** Private ingestion and transactional outbox slice implemented. Lifecycle transitions, PPE association rules, workload rotation verification, and delivery remain open.
+**Status:** Private ingestion, transactional outbox and an HTTPS delivery command implemented. Lifecycle transitions, PPE association rules and workload rotation verification remain open.
 
 ## Scope and deliverables
 
@@ -40,6 +40,17 @@ reused on retry. Pending outbox entries have a null `published_at`.
 Migration `81c540a1d2f6` adds the outbox table. Stop the private listener to
 roll back application traffic while retaining incidents and outbox records.
 Downgrading the schema deletes unsent entries and their idempotency records.
+
+Migration `c38f0a72e914` adds persistent retry state. Schedule
+`python -m app.scripts.incident_outbox` in a private PostgreSQL-connected worker to
+attempt one due delivery per invocation. Set `INCIDENT_PUBLISH_URL` to a trusted
+HTTPS receiver and `INCIDENT_PUBLISH_TOKEN_FILE` to a mounted, dedicated bearer
+credential. The receiver must deduplicate by `Idempotency-Key` and return a 2xx
+response only after durable acceptance. The command sends only event, incident
+and organization IDs. A failed delivery remains pending with exponential retry
+up to a five-minute delay. PostgreSQL locks prevent workers from selecting the
+same row concurrently. A crash after receiver acceptance can repeat delivery
+with the same key. No external receiver has been verified by these tests.
 
 From `backend-v2`, run `python -m pytest -q tests/test_incident_ingestion.py`.
 The PostgreSQL race test uses `PPE_DISPOSABLE_POSTGRES_URL` after Alembic upgrade

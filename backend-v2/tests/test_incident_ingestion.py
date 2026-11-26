@@ -1,6 +1,7 @@
 import os
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from datetime import timedelta
+from threading import Barrier, Event
 from uuid import uuid4
 
 import pytest
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Camera, Incident, IncidentOutbox, Organization, Site, utcnow
 from app.db.session import SessionLocal, get_db
 from app.incident_ingestion import create_ingestion
+from app.scripts import incident_outbox
 
 PATH = '/internal/v1/incidents'
 SECRET = 'synthetic-ingestion-credential-for-tests'
@@ -81,6 +83,35 @@ def test_outbox_failure_rolls_back_incident():
         assert internal.post(PATH, json=payload, headers=HEADERS).status_code == 201
 
 
+def test_outbox_retry_retains_event_identity_and_marks_success(monkeypatch):
+    with SessionLocal.begin() as db:
+        payload = seed(db)
+    with TestClient(create_ingestion(SECRET)) as internal:
+        created = internal.post(PATH, json=payload, headers=HEADERS)
+        assert created.status_code == 201
+
+    now = utcnow()
+    monkeypatch.setattr(incident_outbox, 'utcnow', lambda: now)
+    sent = []
+
+    def publish(event):
+        sent.append(event)
+        return len(sent) > 1
+
+    with SessionLocal() as db:
+        assert incident_outbox.deliver_one(db, publish) is incident_outbox.DeliveryResult.RETRY_SCHEDULED
+        assert incident_outbox.deliver_one(db, publish) is incident_outbox.DeliveryResult.EMPTY
+    now += timedelta(seconds=3)
+    with SessionLocal() as db:
+        assert incident_outbox.deliver_one(db, publish) is incident_outbox.DeliveryResult.PUBLISHED
+        assert incident_outbox.deliver_one(db, publish) is incident_outbox.DeliveryResult.EMPTY
+        row = db.get(IncidentOutbox, payload['event_id'])
+        assert row.attempts == 2 and row.retry_at is None and row.published_at is not None
+    assert sent == [incident_outbox.IncidentCreated(
+        payload['event_id'], payload['organization_id'], created.json()['incident_id'],
+    )] * 2
+
+
 def test_postgres_concurrent_duplicate_delivery():
     url = os.environ.get('PPE_DISPOSABLE_POSTGRES_URL')
     if not url:
@@ -117,5 +148,30 @@ def test_postgres_concurrent_duplicate_delivery():
                 Incident.camera_id == payload['camera_id'],
             )) == 1
             assert db.get(IncidentOutbox, payload['event_id']).incident_id == first.json()['incident_id']
+
+        publishing = Event()
+        release = Event()
+
+        def slow_publish(message):
+            assert message.event_id == payload['event_id']
+            publishing.set()
+            assert release.wait(timeout=10)
+            return True
+
+        def deliver():
+            with Session(engine) as db:
+                return incident_outbox.deliver_one(db, slow_publish)
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            delivery = pool.submit(deliver)
+            try:
+                assert publishing.wait(timeout=10)
+                with Session(engine) as db:
+                    assert incident_outbox.deliver_one(db, lambda _: pytest.fail('Duplicate dispatch')) is (
+                        incident_outbox.DeliveryResult.EMPTY
+                    )
+            finally:
+                release.set()
+            assert delivery.result(timeout=10) is incident_outbox.DeliveryResult.PUBLISHED
     finally:
         engine.dispose()

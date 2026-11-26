@@ -178,6 +178,8 @@ class IncidentOutbox(Base):
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, server_default='0', nullable=False)
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EvidenceAsset(Base):
