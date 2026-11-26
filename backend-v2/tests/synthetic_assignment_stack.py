@@ -9,6 +9,7 @@ from collections import Counter
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
+from statistics import median
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
@@ -48,6 +49,7 @@ pytestmark = pytest.mark.skipif(os.getenv('PPE_STACK_RUN') != '1', reason='Use t
 
 CLASS_MAP = {label: detection(i, 1.0, (1, 1, 2, 2)).class_key for i, label in enumerate(LABELS)}
 FRAME_BYTES = WIDTH * HEIGHT * 3
+REPEAT_CYCLES = 3
 
 
 def owner_engine():
@@ -123,6 +125,7 @@ class MeasuredTransport(httpx.AsyncHTTPTransport):
         self.cancelled = 0
         self.received, self.release = asyncio.Event(), asyncio.Event()
         self.hold = False
+        self.hold_model = None
 
     async def handle_async_request(self, request):
         assert request.url.scheme == 'https' and request.url.host == '127.0.0.1'
@@ -132,7 +135,7 @@ class MeasuredTransport(httpx.AsyncHTTPTransport):
         try:
             response = await super().handle_async_request(request)
             self.latencies.append(monotonic() - started)
-            if self.hold:
+            if self.hold and (self.hold_model is None or body.get('model_key') == self.hold_model):
                 self.received.set()
                 try:
                     await self.release.wait()
@@ -199,6 +202,7 @@ async def exercise_stack(root):
                 db.execute(text('UPDATE public.gateway_principals SET disabled_at = now()'))
 
             availability = {'stall': False}
+            denial_events = []
             control_app = create_app(postgres_reader(assignment_db))
 
             async def control(scope, receive, send):
@@ -206,7 +210,15 @@ async def exercise_stack(root):
                     await asyncio.sleep(2.25)
                     await JSONResponse({'detail': 'Synthetic outage'}, status_code=503)(scope, receive, send)
                 else:
-                    await control_app(scope, receive, send)
+                    async def observe(message):
+                        if (message['type'] == 'http.response.body'
+                                and scope.get('path') == SNAPSHOT_PATH and message.get('body')):
+                            payload = json.loads(message['body'])
+                            if payload.get('decision') == 'revoked':
+                                denial_events.append((monotonic(), payload['revoked_through_generation']))
+                        await send(message)
+
+                    await control_app(scope, receive, observe)
 
             authority_secret, worker_secret = token_urlsafe(32), token_urlsafe(32)
             authority_app = create_authority(authority_secret, postgres_resolver(eligibility_db, 5))
@@ -227,7 +239,7 @@ async def exercise_stack(root):
             worker_url = await stack.enter_async_context(worker_process(cert, key, settings, context))
             await verify_stack(stack, root, owner, context, control_url, worker_url, worker_secret, token,
                                principal, scopes, (model_a, model_b), frames_source, models_source, model_mount,
-                               signer, availability, governance, admin_id)
+                               signer, availability, governance, admin_id, denial_events)
     finally:
         eligibility_db.dispose()
         assignment_db.dispose()
@@ -238,7 +250,7 @@ async def exercise_stack(root):
 
 async def verify_stack(stack, root, owner, context, control_url, worker_url, worker_secret, token,
                        principal, scopes, models, frames_source, models_source, model_mount, signer, availability,
-                       governance, admin_id):
+                       governance, admin_id, denial_events):
     camera_ids = [str(scope.camera_id) for scope in scopes]
     first, second, third = camera_ids
     model_a, model_b = models
@@ -319,17 +331,32 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
             assert bool(result.response.detections) == (model.id == model_a.id)
             assert all(CLASS_MAP[item.original_class] == item.class_key for item in result.response.detections)
 
+    def switch_first(model, revision):
+        with Session(governance['runtime']) as db:
+            result = put_assignment(str(scopes[0].organization_id), scopes[0].camera_id,
+                                    AssignmentInput(model_version_id=UUID(model.id), expected_revision=revision),
+                                    db.get(User, admin_id), db)
+        assert result.revision == revision + 1
+        return monotonic()
+
+    def revoke_model_a(generation):
+        with Session(governance['revoker']) as db, db.begin():
+            assert db.scalar(text('SELECT public.revoke_verified_model(:id)'), {'id': model_a.id}) == generation
+        return monotonic()
+
+    def promote_model_a():
+        sign_manifest(models_source, model_a, signer)
+        with Session(governance['verifier']) as db, db.begin():
+            generation = verify_and_promote(db, model_a.id, model_mount, 'synthetic',
+                                            signer.public_key().public_bytes_raw(), 1024**2)
+        return generation, monotonic()
+
     assert all(await asyncio.gather(*(resolver.refresh(camera) for camera in camera_ids)))
     poll = asyncio.create_task(resolver.run())
     stack.push_async_callback(cancel_poll, poll)
     await check_cameras(dict(zip(camera_ids, (model_a, model_a, model_b))))
     await sample(first)
-    with Session(governance['runtime']) as db:
-        changed = put_assignment(str(scopes[0].organization_id), scopes[0].camera_id,
-                                 AssignmentInput(model_version_id=UUID(model_b.id), expected_revision=0),
-                                 db.get(User, admin_id), db)
-        assert changed.revision == 1
-    switch_at = monotonic()
+    switch_at = switch_first(model_b, 0)
     await wait_for(lambda: resolver.current(first) is not None and
                    resolver.current(first).assignment.model_version_id == UUID(model_b.id), 7)
     switch_delay = monotonic() - switch_at
@@ -342,9 +369,7 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
     try:
         await asyncio.wait_for(worker_transport.received.wait(), 4)
         prior = resolver.current(second)
-        with Session(governance['revoker']) as db, db.begin():
-            assert db.scalar(text('SELECT public.revoke_verified_model(:id)'), {'id': model_a.id}) == prior.generation
-        revoked_at = monotonic()
+        revoked_at = revoke_model_a(prior.generation)
         denial = parse_snapshot_response((await snapshot(scopes[1], new_token)).content)
         assert denial.decision == 'revoked' and denial.assignment_revision == prior.revision
         assert denial.revoked_through_generation == prior.generation
@@ -398,10 +423,7 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
 
     availability['stall'] = False
     restored_at = monotonic()
-    sign_manifest(models_source, model_a, signer)
-    with Session(governance['verifier']) as db, db.begin():
-        generation = verify_and_promote(db, model_a.id, model_mount, 'synthetic',
-                                        signer.public_key().public_bytes_raw(), 1024**2)
+    generation, _ = promote_model_a()
     assert generation > prior.generation and await resolver.refresh(second)
     recovery_delay = monotonic() - restored_at
     recovered = resolver.current(second)
@@ -425,6 +447,145 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
         'inference_responses_ms': [round(value * 1000, 2) for value in worker_transport.latencies],
         'camera_samples_offered': [queue.offers[camera] for camera in camera_ids],
         'camera_samples_dropped_before_dispatch': [queue.offers[camera] - queue.taken[camera] for camera in camera_ids],
+    }, sort_keys=True))
+
+    async with asyncio.timeout(100):
+        await run_repeated_cycles(
+            resolver, dispatcher, queue, paths, control_transport, worker_transport,
+            model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events,
+        )
+    assert list((frames_source / 'frames').iterdir()) == []
+
+
+async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worker,
+                              model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events):
+    """Keep three decoders and the real inference consumer active across repeated changes."""
+    cameras = list(paths)
+    first, second, _ = cameras
+    assert all(await asyncio.gather(*(resolver.refresh(camera) for camera in cameras)))
+    before_offers, before_taken = queue.offers.copy(), queue.taken.copy()
+    first_latency, first_poll = len(worker.latencies), len(control.starts)
+    initial_timeouts = control.cancelled
+    run_started = monotonic()
+    emitted, errors = Counter(), Counter()
+    last_result = {}
+
+    async def consume():
+        while True:
+            try:
+                row = await dispatcher.dispatch_one()
+            except DispatchError as error:
+                if error.code not in ('assignment_invalidated', 'unavailable'):
+                    raise
+                errors[error.code] += 1
+            else:
+                if row is not None:
+                    camera = row.frame.camera_id
+                    active = resolver.current(camera, row.assignment_epoch)
+                    assert active and row.assignment == active.assignment
+                    assert bool(row.response.detections) == (row.response.model_key == model_a.model_key)
+                    emitted[camera] += 1
+                    last_result[camera] = (row.response.model_key, active.generation)
+            await asyncio.sleep(0.02)
+
+    tasks = [asyncio.create_task(resolver.run()), asyncio.create_task(consume())]
+    for camera, path in paths.items():
+        tasks.append(asyncio.create_task(sample_camera(
+            camera, lambda path=path: local_video_source(path), queue,
+            sample_interval=0.2, frame_timeout=4, retry_initial=0.7, retry_max=1.4,
+        )))
+
+    cycles = []
+    revision = 1  # First camera ended the baseline scenario on Model B.
+    try:
+        await wait_for(lambda: all(emitted[camera] > 0 for camera in cameras))
+        for cycle in range(REPEAT_CYCLES):
+            target = model_a if cycle % 2 == 0 else model_b
+            affected = [first, second] if target is model_a else [second]
+            unaffected = [camera for camera in cameras if camera not in affected]
+            switched_at = switch_first(target, revision)
+            revision += 1
+            await wait_for(lambda: resolver.current(first) is not None and
+                           resolver.current(first).revision == revision, 7)
+            switch_delay = monotonic() - switched_at
+            assert resolver.current(first).assignment.model_version_id == UUID(target.id)
+            await wait_for(lambda: last_result.get(first, (None,))[0] == target.model_key, 3)
+            previous = resolver.current(second)
+            assert previous is not None
+
+            worker.received.clear()
+            worker.release.clear()
+            worker.hold_model, worker.hold = model_a.model_key, True
+            try:
+                await asyncio.wait_for(worker.received.wait(), 4)
+                revoked_at = revoke_model_a(previous.generation)
+                await wait_for(lambda: any(at >= revoked_at and floor == previous.generation
+                                           for at, floor in denial_events)
+                               and all(resolver.current(camera) is None for camera in affected), 7)
+                revoke_delay = monotonic() - revoked_at
+                assert all(resolver.current(camera) is not None for camera in unaffected)
+                fenced = errors['assignment_invalidated']
+                old_requests = sum(model == model_a.model_key for _, model in worker.starts)
+            finally:
+                worker.hold = False
+                worker.release.set()
+            await wait_for(lambda: errors['assignment_invalidated'] > fenced, 3)
+            unaffected_counts = {camera: emitted[camera] for camera in unaffected}
+            await wait_for(lambda: all(emitted[camera] > count
+                                       for camera, count in unaffected_counts.items()), 3)
+            assert sum(model == model_a.model_key for _, model in worker.starts) == old_requests
+
+            generation, promoted_at = promote_model_a()
+            assert generation > previous.generation
+
+            def recovered():
+                return all((binding := resolver.current(camera)) is not None
+                           and binding.generation == generation for camera in affected)
+
+            await wait_for(recovered, 7)
+            recovery_delay = monotonic() - promoted_at
+            await wait_for(lambda: all(last_result.get(camera) == (model_a.model_key, generation)
+                                       for camera in affected), 4)
+            assert resolver.current(second).revision == previous.revision
+            cycles.append({'switch_s': round(switch_delay, 3), 'revoke_s': round(revoke_delay, 3),
+                           'recovery_s': round(recovery_delay, 3)})
+        assert all(not task.done() for task in tasks)
+    finally:
+        live_timeouts = control.cancelled - initial_timeouts
+        worker.hold = False
+        worker.release.set()
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise result
+
+    live_taken = queue.taken - before_taken
+    offers = queue.offers - before_offers
+    pending = Counter()
+    while (frame := queue.take()) is not None:
+        pending[frame.camera_id] += 1
+    drops = [offers[camera] - live_taken[camera] - pending[camera] for camera in cameras]
+    assert all(count >= 0 for count in drops)
+    revocations = [cycle['revoke_s'] for cycle in cycles]
+    periods = []
+    for camera in cameras:
+        starts = [at for at, camera_id in control.starts[first_poll:] if camera_id == camera]
+        periods.extend(b - a for a, b in zip(starts, starts[1:]))
+    print('PPE_STACK_REPEATED ' + json.dumps({
+        'elapsed_s': round(monotonic() - run_started, 3), 'cycles': cycles,
+        'revoke_median_s': median(revocations), 'revoke_max_s': max(revocations),
+        'offered': [offers[camera] for camera in cameras],
+        'dropped_before_dispatch': drops,
+        'pending_on_stop': [pending[camera] for camera in cameras],
+        'emitted': [emitted[camera] for camera in cameras],
+        'invalidated_responses': errors['assignment_invalidated'],
+        'worker_unavailable': errors['unavailable'],
+        'poll_timeouts': live_timeouts,
+        'poll_intervals_over_5s': sum(interval > 5 for interval in periods),
+        'missed_full_poll_slots': sum(max(0, int(interval / 5) - 1) for interval in periods),
+        'max_worker_header_ms': round(max(worker.latencies[first_latency:]) * 1000, 2),
     }, sort_keys=True))
 
 

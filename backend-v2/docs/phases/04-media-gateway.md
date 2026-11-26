@@ -182,6 +182,17 @@ discard). The 5/2/10 s policy and fake-clock tests remain the reference for
 boundary behavior. A single loopback run provides synthetic evidence; live
 camera throughput and cross-site revocation timing remain **NOT TESTED**.
 
+The same stack command also runs three bounded switch/revoke/reverify cycles
+while all three synthetic decoders and the inference consumer stay active.
+Each cycle holds a real worker response until affected assignment epochs have
+been fenced, checks that an unaffected camera continues to emit, and requires
+a new verification generation before accepting recovered work.
+`PPE_STACK_REPEATED` reports each cycle's elapsed observations, revocation
+median and maximum, and per-camera offers, drops, queued frames at shutdown,
+and emitted results. It includes individual test harness counters for
+discarded responses and polling cadence. The fixture is unpaced, so frame
+counts and drops characterize this workload only.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.
