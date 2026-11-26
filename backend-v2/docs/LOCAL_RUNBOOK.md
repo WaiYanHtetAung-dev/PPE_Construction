@@ -47,7 +47,10 @@ Use **Step over** in the Inspector to watch the test sign in, render synthetic
 site, camera and incident data, and sign out. The browser and local servers
 close when the test ends. The dashboard does not display the synthetic media
 pipeline or a live stream. Decoder/ONNX timing and sampling comparisons are
-reported by the separate Linux `python scripts/ci_checks.py stack` command.
+reported by the separate Linux stack command, along with a real ONNX worker
+stop and restart while three synthetic cameras keep sampling. See the
+[disposable stack prerequisites](phases/04-media-gateway.md#disposable-https-stack-acceptance)
+for Linux runner setup.
 
 In GitHub Actions, `.github/workflows/frontend-v2-ci.yml` runs the existing
 frontend checks first. The browser steps run from `backend-v2` on Ubuntu:

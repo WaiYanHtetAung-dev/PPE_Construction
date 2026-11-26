@@ -264,8 +264,8 @@ async def exercise_stack(root):
                 path.touch(mode=0o600, exist_ok=False)
                 path.write_bytes(data)
                 settings[env] = str(path)
-            worker_url = await stack.enter_async_context(worker_process(cert, key, settings, context))
-            await verify_stack(stack, root, owner, context, control_url, worker_url, worker_secret, token,
+            worker = await stack.enter_async_context(worker_process(cert, key, settings, context))
+            await verify_stack(stack, root, owner, context, control_url, worker, worker_secret, token,
                                principal, scopes, (model_a, model_b), frames_source, models_source, model_mount,
                                signer, availability, governance, admin_id, denial_events)
     finally:
@@ -276,12 +276,13 @@ async def exercise_stack(root):
         owner.dispose()
 
 
-async def verify_stack(stack, root, owner, context, control_url, worker_url, worker_secret, token,
+async def verify_stack(stack, root, owner, context, control_url, worker, worker_secret, token,
                        principal, scopes, models, frames_source, models_source, model_mount, signer, availability,
                        governance, admin_id, denial_events):
     camera_ids = [str(scope.camera_id) for scope in scopes]
     first, second, third = camera_ids
     model_a, model_b = models
+    worker_url = worker.origin
     queue = MeasuredQueue()
     control_transport, worker_transport = MeasuredTransport(context), MeasuredTransport(context)
     client = await stack.enter_async_context(httpx.AsyncClient(verify=context, trust_env=False, timeout=2))
@@ -497,7 +498,93 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
             trials.append(trial)
             print('PPE_STACK_SAMPLING ' + json.dumps(trial, sort_keys=True))
     print('PPE_STACK_SAMPLING_BLOCKS ' + json.dumps(summarize_sampling_trials(trials), sort_keys=True))
+    transport = httpx.AsyncHTTPTransport(verify=context, trust_env=False,
+                                         limits=httpx.Limits(max_keepalive_connections=0))
+    async with InferenceDispatcher(queue, resolver, frames_source, worker_origin=worker_url,
+                                   token=worker_secret, transport=transport, timeout=1.5) as probe:
+        await verify_worker_restart(worker, resolver, probe, queue, paths, frames_source / 'frames')
     assert list((frames_source / 'frames').iterdir()) == []
+
+
+async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, staged):
+    """Restart the real TLS worker while all three paced sources keep sampling."""
+    interval = 0.3
+    assert all(await asyncio.gather(*(resolver.refresh(camera) for camera in paths)))
+
+    def assignments():
+        current = (resolver.current(camera) for camera in paths)
+        bindings = []
+        for active in current:
+            assert active is not None
+            bindings.append((active.assignment, active.revision, active.generation))
+        return bindings
+
+    async def results_by_camera():
+        rows = {}
+        async with asyncio.timeout(8):
+            while len(rows) < len(paths):
+                row = await dispatcher.dispatch_one()
+                if row is None:
+                    await asyncio.sleep(0.015)
+                    continue
+                camera = row.frame.camera_id
+                active = resolver.current(camera, row.assignment_epoch)
+                assert camera in paths and active and row.assignment == active.assignment
+                assert row.frame.sample_interval == interval
+                rows[camera] = row
+        return rows
+
+    active_before = assignments()
+    clock = asyncio.get_running_loop().time
+    async with asyncio.TaskGroup() as group:
+        samplers = [group.create_task(sample_camera(
+            camera, lambda path=path, fps=fps: paced_video(path, fps, lambda *_: None),
+            queue, sample_interval=interval,
+            frame_timeout=4, retry_initial=0.7, retry_max=1.4,
+        )) for (camera, path), fps in zip(paths.items(), (10, 24, 30), strict=True)]
+        poll = group.create_task(resolver.run())
+        try:
+            baseline = await results_by_camera()
+            assert any(row.response.detections for row in baseline.values())
+            await worker.stop()
+            offers = queue.offers.copy()
+            await wait_for(lambda: all(queue.offers[camera] > offers[camera] for camera in paths), 4)
+            assert assignments() == active_before
+            taken = queue.taken.total()
+            failed_at = monotonic()
+            with pytest.raises(DispatchError, match='^timeout$'):
+                await dispatcher.dispatch_one()
+            failure_delay = monotonic() - failed_at
+            assert failure_delay < 3
+            assert queue.taken.total() == taken + 1 and not list(staged.iterdir())
+
+            restart_at = clock()
+            await worker.start()
+            ready_at = clock()
+            offers = queue.offers.copy()
+            await wait_for(lambda: all(queue.offers[camera] > offers[camera] for camera in paths), 4)
+            recovered = await results_by_camera()
+            recovery_delay = clock() - restart_at
+            assert assignments() == active_before
+            for camera, row in recovered.items():
+                before = baseline[camera]
+                assert row.frame.sampled_monotonic >= ready_at
+                assert row.frame.source_frame_index > before.frame.source_frame_index
+                assert row.response.request_id != before.response.request_id
+                assert row.response.frame_id != before.response.frame_id
+                assert row.response.detections == before.response.detections
+        finally:
+            for task in [poll, *samplers]:
+                task.cancel()
+    while queue.take() is not None:
+        pass
+    print('PPE_STACK_WORKER_RESTART ' + json.dumps({
+        'sample_interval_s': interval, 'cameras_recovered': len(recovered),
+        'outage_dispatch': 'timeout', 'outage_deadline_s': 1.5,
+        'outage_dispatch_s': round(failure_delay, 3),
+        'worker_tls_ready_s': round(ready_at - restart_at, 3),
+        'restart_to_all_cameras_s': round(recovery_delay, 3),
+    }, sort_keys=True))
 
 
 def summarize_sampling_trials(trials):

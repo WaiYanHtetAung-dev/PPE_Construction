@@ -132,11 +132,28 @@ async def listener(app, cert, key):
 @asynccontextmanager
 async def worker_process(cert, key, settings, context):
     with loopback_socket() as sock:
-        origin = f'https://127.0.0.1:{sock.getsockname()[1]}'
-        env = os.environ.copy()
+        worker = RestartableWorker(sock, cert, key, settings, context)
+        try:
+            await worker.start()
+            yield worker
+        finally:
+            await worker.stop()
+
+
+class RestartableWorker:
+    def __init__(self, sock, cert, key, settings, context):
+        # The parent retains the loopback socket across child process restarts.
+        self.sock = sock
+        self.cert, self.key = cert, key
+        self.context = context
+        self.origin = f'https://127.0.0.1:{sock.getsockname()[1]}'
+        self.process = None
         # Keep database and CI credentials outside the isolated worker process.
-        env = {k: env[k] for k in ('PATH', 'PYTHONPATH', 'LD_LIBRARY_PATH') if k in env}
-        env.update(settings, PYTHONUNBUFFERED='1')
+        self.env = {k: os.environ[k] for k in ('PATH', 'PYTHONPATH', 'LD_LIBRARY_PATH') if k in os.environ}
+        self.env.update(settings, PYTHONUNBUFFERED='1')
+
+    async def start(self):
+        assert self.process is None, 'Stop the existing worker before restarting'
         bootstrap = """
 import socket
 import sys
@@ -151,31 +168,36 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM, fileno=int(fd)) as listen
     )
     uvicorn.Server(config).run(sockets=[listener])
 """
-        diagnostic = key.parent / 'worker-stderr.log'
+        diagnostic = self.key.parent / 'worker-stderr.log'
         with diagnostic.open('wb') as log:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable, '-B', '-c', bootstrap, str(sock.fileno()), str(cert), str(key),
-                env=env, pass_fds=(sock.fileno(),), stdout=asyncio.subprocess.DEVNULL, stderr=log,
+            fd = self.sock.fileno()
+            self.process = await asyncio.create_subprocess_exec(
+                sys.executable, '-B', '-c', bootstrap, str(fd), str(self.cert), str(self.key),
+                env=self.env, pass_fds=(fd,), stdout=asyncio.subprocess.DEVNULL, stderr=log,
             )
-        sock.close()
+        async with asyncio.timeout(12), httpx.AsyncClient(verify=self.context, trust_env=False,
+                                                          timeout=0.25) as client:
+            while True:
+                if self.process.returncode is not None:
+                    # Bootstrap receives only ephemeral paths and no database or CI credentials.
+                    message = diagnostic.read_text(encoding='utf-8', errors='replace')[-2000:]
+                    raise AssertionError(f'Inference worker startup failed: {message}')
+                try:
+                    if (await client.get(self.origin)).status_code == 404:
+                        return
+                except httpx.TransportError:
+                    pass
+                await asyncio.sleep(0.05)
+
+    async def stop(self):
+        process = self.process
+        if process is None:
+            return
+        if process.returncode is None:
+            process.terminate()
         try:
-            async with asyncio.timeout(12), httpx.AsyncClient(verify=context, trust_env=False, timeout=0.25) as client:
-                while True:
-                    if process.returncode is not None:
-                        # Bootstrap receives only ephemeral paths and no database or CI credentials.
-                        message = diagnostic.read_text(encoding='utf-8', errors='replace')[-2000:]
-                        raise AssertionError(f'Inference worker startup failed: {message}')
-                    try:
-                        if (await client.get(origin)).status_code == 404:
-                            break
-                    except httpx.TransportError:
-                        await asyncio.sleep(0.05)
-            yield origin
-        finally:
-            if process.returncode is None:
-                process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=8)
-            except TimeoutError:
-                process.kill()
-                await process.wait()
+            await asyncio.wait_for(process.wait(), timeout=8)
+        except TimeoutError:
+            process.kill()
+            await asyncio.wait_for(process.wait(), timeout=3)
+        self.process = None

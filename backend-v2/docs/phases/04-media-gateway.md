@@ -223,6 +223,17 @@ per-camera medians across windows. The age aggregate is the median of the
 window medians. These blocks are evidence for a synthetic pilot choice.
 Production latency and confidence intervals are outside the experiment.
 
+`PPE_STACK_WORKER_RESTART` reports a worker stop and restart at the 0.3 s
+pilot candidate interval. The test keeps all three paced sources and
+assignment polling active throughout. The parent holds the loopback port
+while the child is stopped, so a fresh TLS connection exercises the 1.5 s
+inference deadline. The timed-out attempt consumes one sample, emits no
+result and removes its staged file. A new worker process serves the same
+HTTPS origin. The test requires a new attributed ONNX result from each
+camera sampled after TLS readiness and verifies that the active assignment
+revisions and model verification generations stay the same. The candidate
+interval and shortened deadline apply to this test only.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.
