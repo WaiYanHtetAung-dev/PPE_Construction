@@ -1,10 +1,20 @@
 # Phase 4 — RTSP ingest, frame sampling, camera health and AI integration
 
-**Status:** PLANNED — do not assume implementation or test success.
+**Status:** Bounded frame handoff implemented. RTSP decoding, reconnect, live camera health and inference integration remain planned.
 
 ## Scope and deliverables
 
 Introduce MediaMTX/FFmpeg or GStreamer pipeline separated from FastAPI, secure secrets, bounded sampling and reconnect policy.
+
+`media_gateway.frame_queue.FrameQueue` provides an in-process handoff for trusted
+samplers. It keeps one pending immutable frame per camera. New samples replace
+that camera's pending frame without moving its turn. Once served, a camera
+rejoins at the tail with its next sample. Offers exceeding the available slots
+or byte budget are rejected, preserving work already queued for other cameras.
+Limits apply to pending payloads. The dispatcher must separately bound in-flight
+work, and the decoder must bound its own buffers. Run
+`python -m unittest tests.test_frame_queue` from `backend-v2` for synthetic
+admission, ordering and concurrency checks.
 
 ## Design decisions and prerequisites
 
