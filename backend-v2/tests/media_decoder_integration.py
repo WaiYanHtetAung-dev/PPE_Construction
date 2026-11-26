@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw
 from media_gateway.frame_queue import FrameQueue
 from media_gateway.sampler import sample_camera
 from media_gateway.video_source import local_video_source
+from tests.synthetic_stack_support import paced_video
 
 WIDTH, HEIGHT = 160, 64
 
@@ -53,6 +54,16 @@ class TestSyntheticDecoder(unittest.IsolatedAsyncioTestCase):
         self.clips = {fps: self.folder / f'{fps}.mp4' for fps in (10, 24, 30)}
         for fps, path in self.clips.items():
             generate_clip(path, fps)
+
+    async def test_paced_replay_preserves_timing_across_clip_boundary(self):
+        gaps = []
+        async with asyncio.timeout(8), paced_video(self.clips[10], 10, lambda _, gap: gaps.append(gap)) as stream:
+            frames = [await anext(stream) for _ in range(12)]
+        self.assertEqual([frame.index for frame in frames], list(range(12)))
+        for index, frame in enumerate(frames):
+            self.assertAlmostEqual(frame.source_timestamp, index / 10)
+        self.assertIsNone(gaps[0])
+        self.assertTrue(all(gap >= 0.095 for gap in gaps[1:]))
 
     async def test_unavailable_local_file_fails_before_decoder_launch(self):
         for path in (self.folder / 'missing.mp4', self.folder / 'test.txt'):

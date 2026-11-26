@@ -41,7 +41,7 @@ from media_gateway.inference_dispatch import DispatchError, InferenceDispatcher
 from media_gateway.sampler import sample_camera
 from media_gateway.video_source import local_video_source
 from tests.media_decoder_integration import HEIGHT, WIDTH, generate_clip
-from tests.synthetic_stack_support import listener, readonly_bind, temporary_tls, wait_for, worker_process
+from tests.synthetic_stack_support import listener, paced_video, readonly_bind, temporary_tls, wait_for, worker_process
 from tests.test_onnx_cpu import fixture_graph
 from tests.test_model_verification import role_connections
 
@@ -153,10 +153,35 @@ class MeasuredQueue(FrameQueue):
         super().__init__(max_cameras=3, max_bytes=3 * FRAME_BYTES, max_frame_bytes=FRAME_BYTES)
         self.offers = Counter()
         self.taken = Counter()
+        self.losses = Counter()
+        self.purges = Counter()
+        self.revoking = set()
+        self.inference_busy = False
+        self.response_held = lambda: False
 
     def offer(self, frame):
-        self.offers[frame.camera_id] += 1
-        return super().offer(frame)
+        camera = frame.camera_id
+        self.offers[camera] += 1
+        pending_before = camera in self._pending
+        purges_before = self.purges[camera]
+        admitted = super().offer(frame)
+        if not admitted:
+            # The fixtures are fixed-size and the queue has exactly one full slot per camera.
+            assert len(frame.data) == FRAME_BYTES
+            self.losses[camera, 'policy_rejected'] += 1
+        elif pending_before and self.purges[camera] == purges_before:
+            reason = ('replacement_held_response' if self.response_held() else
+                      'replacement_dispatch_busy' if self.inference_busy else 'replacement_idle')
+            self.losses[camera, reason] += 1
+        return admitted
+
+    def discard(self, camera_id):
+        pending = camera_id in self._pending
+        super().discard(camera_id)
+        if pending:
+            self.purges[camera_id] += 1
+            reason = 'purge_during_revocation' if camera_id in self.revoking else 'purge_other'
+            self.losses[camera_id, reason] += 1
 
     def take(self):
         frame = super().take()
@@ -449,29 +474,39 @@ async def verify_stack(stack, root, owner, context, control_url, worker_url, wor
         'camera_samples_dropped_before_dispatch': [queue.offers[camera] - queue.taken[camera] for camera in camera_ids],
     }, sort_keys=True))
 
-    async with asyncio.timeout(100):
-        await run_repeated_cycles(
-            resolver, dispatcher, queue, paths, control_transport, worker_transport,
-            model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events,
-        )
+    revision = 1
+    for paced in (False, True):
+        if paced:
+            switch_first(model_b, revision)
+            revision += 1
+        async with asyncio.timeout(100):
+            revision = await run_repeated_cycles(
+                resolver, dispatcher, queue, paths, control_transport, worker_transport,
+                model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events,
+                revision=revision, paced=paced,
+            )
     assert list((frames_source / 'frames').iterdir()) == []
 
 
 async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worker,
-                              model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events):
+                              model_a, model_b, switch_first, revoke_model_a, promote_model_a, denial_events,
+                              *, revision, paced):
     """Keep three decoders and the real inference consumer active across repeated changes."""
     cameras = list(paths)
     first, second, _ = cameras
     assert all(await asyncio.gather(*(resolver.refresh(camera) for camera in cameras)))
-    before_offers, before_taken = queue.offers.copy(), queue.taken.copy()
+    before_offers, before_taken, before_losses = queue.offers.copy(), queue.taken.copy(), queue.losses.copy()
     first_latency, first_poll = len(worker.latencies), len(control.starts)
     initial_timeouts = control.cancelled
     run_started = monotonic()
     emitted, errors = Counter(), Counter()
     last_result = {}
+    source_stats = {}
+    queue.response_held = lambda: worker.hold and worker.received.is_set() and not worker.release.is_set()
 
     async def consume():
         while True:
+            queue.inference_busy = True
             try:
                 row = await dispatcher.dispatch_one()
             except DispatchError as error:
@@ -486,17 +521,38 @@ async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worke
                     assert bool(row.response.detections) == (row.response.model_key == model_a.model_key)
                     emitted[camera] += 1
                     last_result[camera] = (row.response.model_key, active.generation)
+            finally:
+                queue.inference_busy = False
             await asyncio.sleep(0.02)
 
+    def source_observer(camera, fps):
+        stats = source_stats[camera] = {'count': 0, 'first': None, 'last': None, 'min_gap': None}
+
+        def observe(now, gap):
+            stats['count'] += 1
+            if stats['first'] is None:
+                stats['first'] = now
+            stats['last'] = now
+            if gap is not None:
+                assert gap >= 0.95 / fps
+                previous = stats['min_gap']
+                stats['min_gap'] = gap if previous is None else min(previous, gap)
+
+        return observe
+
     tasks = [asyncio.create_task(resolver.run()), asyncio.create_task(consume())]
-    for camera, path in paths.items():
+    for (camera, path), fps in zip(paths.items(), (10, 24, 30), strict=True):
+        if paced:
+            observe = source_observer(camera, fps)
+            source = lambda path=path, fps=fps, observe=observe: paced_video(path, fps, observe)
+        else:
+            source = lambda path=path: local_video_source(path)
         tasks.append(asyncio.create_task(sample_camera(
-            camera, lambda path=path: local_video_source(path), queue,
+            camera, source, queue,
             sample_interval=0.2, frame_timeout=4, retry_initial=0.7, retry_max=1.4,
         )))
 
     cycles = []
-    revision = 1  # First camera ended the baseline scenario on Model B.
     try:
         await wait_for(lambda: all(emitted[camera] > 0 for camera in cameras))
         for cycle in range(REPEAT_CYCLES):
@@ -518,6 +574,7 @@ async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worke
             worker.hold_model, worker.hold = model_a.model_key, True
             try:
                 await asyncio.wait_for(worker.received.wait(), 4)
+                queue.revoking.update(affected)
                 revoked_at = revoke_model_a(previous.generation)
                 await wait_for(lambda: any(at >= revoked_at and floor == previous.generation
                                            for at, floor in denial_events)
@@ -527,6 +584,7 @@ async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worke
                 fenced = errors['assignment_invalidated']
                 old_requests = sum(model == model_a.model_key for _, model in worker.starts)
             finally:
+                queue.revoking.clear()
                 worker.hold = False
                 worker.release.set()
             await wait_for(lambda: errors['assignment_invalidated'] > fenced, 3)
@@ -568,16 +626,21 @@ async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worke
         pending[frame.camera_id] += 1
     drops = [offers[camera] - live_taken[camera] - pending[camera] for camera in cameras]
     assert all(count >= 0 for count in drops)
+    losses = queue.losses - before_losses
+    by_camera = [{reason: count for (camera_id, reason), count in losses.items() if camera_id == camera}
+                 for camera in cameras]
+    assert [sum(counts.values()) for counts in by_camera] == drops
     revocations = [cycle['revoke_s'] for cycle in cycles]
     periods = []
     for camera in cameras:
         starts = [at for at, camera_id in control.starts[first_poll:] if camera_id == camera]
         periods.extend(b - a for a, b in zip(starts, starts[1:]))
-    print('PPE_STACK_REPEATED ' + json.dumps({
+    metrics = {
         'elapsed_s': round(monotonic() - run_started, 3), 'cycles': cycles,
         'revoke_median_s': median(revocations), 'revoke_max_s': max(revocations),
         'offered': [offers[camera] for camera in cameras],
         'dropped_before_dispatch': drops,
+        'drop_breakdown': by_camera,
         'pending_on_stop': [pending[camera] for camera in cameras],
         'emitted': [emitted[camera] for camera in cameras],
         'invalidated_responses': errors['assignment_invalidated'],
@@ -586,7 +649,17 @@ async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worke
         'poll_intervals_over_5s': sum(interval > 5 for interval in periods),
         'missed_full_poll_slots': sum(max(0, int(interval / 5) - 1) for interval in periods),
         'max_worker_header_ms': round(max(worker.latencies[first_latency:]) * 1000, 2),
-    }, sort_keys=True))
+    }
+    if paced:
+        metrics['paced_sources'] = [{
+            'target_fps': fps, 'decoded_frames_released': source_stats[camera]['count'],
+            'effective_fps': round((source_stats[camera]['count'] - 1)
+                                   / (source_stats[camera]['last'] - source_stats[camera]['first']), 2),
+            'min_interval_ms': round(source_stats[camera]['min_gap'] * 1000, 2),
+        } for camera, fps in zip(cameras, (10, 24, 30), strict=True)]
+    label = 'PPE_STACK_PACED' if paced else 'PPE_STACK_REPEATED'
+    print(label + ' ' + json.dumps(metrics, sort_keys=True))
+    return revision
 
 
 async def cancel_poll(task):

@@ -193,6 +193,21 @@ and emitted results. It includes individual test harness counters for
 discarded responses and polling cadence. The fixture is unpaced, so frame
 counts and drops characterize this workload only.
 
+The stack repeats the same three switches and revocations with paced replay
+(`PPE_STACK_PACED`). It preserves presentation timestamps across loop
+boundaries and prevents catch-up bursts. The fixture rates are 10, 24 and
+30 FPS, with a 0.2 s media-time sampling target. The report includes measured
+effective source FPS, which can be lower because the decoder reopens at each
+clip boundary and the replay does not catch up.
+
+The test accounts for every pre-dispatch loss as policy rejection, pending
+frame replacement, or queue purge. Replacements are separated into dispatcher
+idle, dispatcher occupied, and intentionally held response windows. Purges
+are separated by whether they occurred within the controlled revocation
+window. Dispatcher occupancy is an observed condition, not a causal estimate
+of production inference capacity. Frames still queued at shutdown and
+in-flight responses discarded by the assignment fence are reported separately.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.

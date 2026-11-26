@@ -7,7 +7,8 @@ import socket
 import ssl
 import subprocess
 import sys
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import aclosing, asynccontextmanager, contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -17,6 +18,38 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from media_gateway.video_source import local_video_source
+
+
+@asynccontextmanager
+async def paced_video(path, fps, observe):
+    """Loop a generated clip with continuous PTS and no catch-up bursts."""
+    clock = asyncio.get_running_loop().time
+
+    async def frames():
+        offset, index, previous_pts, released = 0.0, 0, None, None
+        while True:
+            count = 0
+            async with local_video_source(path) as decoded:
+                async for frame in decoded:
+                    pts = offset + frame.source_timestamp
+                    if previous_pts is not None:
+                        gap = pts - previous_pts
+                        if gap <= 0:
+                            raise ValueError('Fixture presentation time did not advance')
+                        await asyncio.sleep(max(0, released + gap - clock()))
+                    now = clock()
+                    observe(now, None if released is None else now - released)
+                    yield replace(frame, source_timestamp=pts, index=index)
+                    previous_pts, released = pts, now
+                    index += 1
+                    count += 1
+            if count != fps:
+                raise ValueError('Unexpected frame count in one-second fixture')
+            offset += 1.0
+
+    async with aclosing(frames()) as stream:
+        yield stream
 
 def temporary_tls(root):
     now = datetime.now(UTC)
