@@ -1,0 +1,31 @@
+stages: [test]
+
+default:
+  image: python:3.12-slim
+
+backend-validation:
+  stage: test
+  timeout: 15m
+  script:
+    - cd backend-v2
+    - python -m pip install -r requirements-dev.txt -r requirements-inference-cpu.txt
+    - python scripts/ci_checks.py backend
+
+postgres-integration:
+  stage: test
+  timeout: 15m
+  services:
+    - name: postgres:17
+      alias: postgres
+  variables:
+    FF_NETWORK_PER_BUILD: "true"
+    POSTGRES_USER: ppe_ci
+    POSTGRES_PASSWORD: ppe_ci_nonproduction
+    POSTGRES_DB: ppe_ci
+    DATABASE_URL: postgresql+psycopg://ppe_ci:ppe_ci_nonproduction@postgres:5432/ppe_ci
+    APP_ENV: ci
+    ENABLE_API_DOCS: "false"
+  script:
+    - cd backend-v2
+    - python -m pip install -r requirements-dev.txt
+    - python scripts/ci_checks.py postgres
