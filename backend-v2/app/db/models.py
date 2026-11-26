@@ -170,6 +170,16 @@ class Incident(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class IncidentOutbox(Base):
+    __tablename__ = 'incident_outbox'
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(ForeignKey('incidents.id'), nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class EvidenceAsset(Base):
     __tablename__ = 'evidence_assets'
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

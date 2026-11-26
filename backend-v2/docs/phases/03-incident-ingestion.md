@@ -1,6 +1,6 @@
 # Phase 3 — Secure inference result ingestion and incident lifecycle
 
-**Status:** PLANNED — do not assume implementation or test success.
+**Status:** Private ingestion and transactional outbox slice implemented. Lifecycle transitions, PPE association rules, workload rotation verification, and delivery remain open.
 
 ## Scope and deliverables
 
@@ -11,6 +11,39 @@ Authenticated internal ingest, provenance, replay-safe idempotency, person/PPE a
 Design class association, unknown status, tracking IDs, event key, state machine open/ack/resolved and retry behavior.
 
 **Critical note:** Inference service only detects objects; business event worker decides incidents. Cross-tenant FKs must be validated.
+
+### ADR-005 first ingestion slice, pending review
+
+- Run ingestion as a private FastAPI entry point. Authenticate a dedicated rules workload with a secret mounted at runtime. Keep browser sessions and inference-worker credentials outside this trust boundary.
+- Accept an already-confirmed violation with an event UUID, observation timestamp, organization/site/camera IDs, and violation type. Validate the resource chain in one database query before writing. Treat the rules worker as the source of confirmed events; keep frame-level classification and unknown-state decisions in that worker.
+- Store a canonical payload fingerprint with the event UUID. Identical retries return the existing incident ID. Reusing the UUID with a different payload returns a conflict. Enforce the UUID with a unique database constraint to cover concurrent delivery.
+- Commit the incident and its pending outbox message in one transaction. Retain the idempotency record through the agreed retry horizon, including after downstream delivery. Keep notification delivery and incident lifecycle transitions as separately tested slices.
+- Test the duplicate race and rollback on disposable PostgreSQL. Keep the existing public `/api/v1` OpenAPI surface unchanged and document the private contract separately.
+
+### Private endpoint contract
+
+The separate ASGI factory is `app.incident_ingestion:from_environment`. Configure
+`INCIDENT_INGESTION_TOKEN_FILE` with the path of a mounted credential containing
+32–256 printable ASCII characters. Expose this listener only on the trusted
+workload network with TLS termination. The authorized rules workload is trusted
+to submit events across the organizations it serves. Keep this credential
+separate from user and inference credentials.
+
+`POST /internal/v1/incidents` takes `event_id`, `organization_id`, `site_id`, and
+`camera_id` UUIDs, a timezone-aware `detected_at`, and a lowercase snake-case
+`violation_type`. It returns `201` on initial acceptance, `200` for an identical
+replay (both with `incident_id`), `409` for conflicting reuse, `404` for a resource
+binding mismatch, `401` for missing or invalid credentials, and `422` for an
+invalid body. The event UUID must be generated once per confirmed violation and
+reused on retry. Pending outbox entries have a null `published_at`.
+
+Migration `81c540a1d2f6` adds the outbox table. Stop the private listener to
+roll back application traffic while retaining incidents and outbox records.
+Downgrading the schema deletes unsent entries and their idempotency records.
+
+From `backend-v2`, run `python -m pytest -q tests/test_incident_ingestion.py`.
+The PostgreSQL race test uses `PPE_DISPOSABLE_POSTGRES_URL` after Alembic upgrade
+on the ephemeral CI database.
 
 ## Execution plan
 
