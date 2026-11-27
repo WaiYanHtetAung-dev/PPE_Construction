@@ -1,0 +1,120 @@
+name: Disposable PostgreSQL Restore Rehearsal
+
+on:
+  pull_request:
+    paths:
+      - 'backend-v2/alembic/**'
+      - 'backend-v2/alembic.ini'
+      - 'backend-v2/requirements*.txt'
+      - '.github/workflows/postgres-restore-ci.yml'
+  push:
+    branches: ['main', 'feature/**', 'fix/**']
+    paths:
+      - 'backend-v2/alembic/**'
+      - 'backend-v2/alembic.ini'
+      - 'backend-v2/requirements*.txt'
+      - '.github/workflows/postgres-restore-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend-v2
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ppe_ci
+          POSTGRES_PASSWORD: ppe_ci_nonproduction
+          POSTGRES_DB: ppe_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ppe_ci -d ppe_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: ci
+      DATABASE_URL: postgresql+psycopg://ppe_ci:ppe_ci_nonproduction@127.0.0.1:5432/ppe_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Migrate disposable source database
+        run: python -m alembic upgrade head
+      - name: Back up and restore synthetic rows
+        shell: bash
+        env:
+          POSTGRES_SERVICE: ${{ job.services.postgres.id }}
+        run: |
+          [[ "$GITHUB_ACTIONS" == true && "$POSTGRES_SERVICE" =~ ^[a-f0-9]{64}$ ]]
+
+          sql() {
+            local database="$1"
+            shift
+            docker exec -i "$POSTGRES_SERVICE" psql --no-psqlrc --no-password \
+              --username=ppe_ci --dbname="$database" --set=ON_ERROR_STOP=1 --tuples-only --no-align "$@"
+          }
+
+          sql ppe_ci <<'SQL'
+          BEGIN;
+          INSERT INTO organizations (id, name, created_at)
+            VALUES ('restore-org', 'Restore fixture', now());
+          INSERT INTO sites (id, organization_id, name, created_at)
+            VALUES ('restore-site', 'restore-org', 'Restore fixture site', now());
+          INSERT INTO cameras (id, site_id, name, stream_ref, enabled, created_at)
+            VALUES ('restore-camera', 'restore-site', 'Before backup', 'stream:restore/synthetic', true, now());
+          COMMIT;
+          SQL
+
+          source_revision="$(sql ppe_ci --command='SELECT version_num FROM alembic_version')"
+          [[ -n "$source_revision" ]]
+          backup_start="$(date +%s%3N)"
+          docker exec "$POSTGRES_SERVICE" pg_dump --no-password --username=ppe_ci \
+            --dbname=ppe_ci --format=custom --file=/tmp/ppe-ci-rehearsal.dump
+          backup_ms=$(( $(date +%s%3N) - backup_start ))
+
+          sql ppe_ci --command="UPDATE cameras SET name = 'After backup' WHERE id = 'restore-camera'"
+          restore_start="$(date +%s%3N)"
+          docker exec "$POSTGRES_SERVICE" createdb --no-password --username=ppe_ci \
+            --template=template0 ppe_restore_ci
+          docker exec "$POSTGRES_SERVICE" pg_restore --no-password --username=ppe_ci \
+            --dbname=ppe_restore_ci --single-transaction --exit-on-error /tmp/ppe-ci-rehearsal.dump
+
+          [[ "$(sql ppe_restore_ci --command='SELECT version_num FROM alembic_version')" == "$source_revision" ]]
+          restored="$(sql ppe_restore_ci --command="SELECT o.name, s.name, c.name FROM cameras c
+            JOIN sites s ON c.site_id = s.id JOIN organizations o ON s.organization_id = o.id
+            WHERE c.id = 'restore-camera'")"
+          [[ "$restored" == 'Restore fixture|Restore fixture site|Before backup' ]]
+          [[ "$(sql ppe_ci --command="SELECT name FROM cameras WHERE id = 'restore-camera'")" == 'After backup' ]]
+
+          sql ppe_restore_ci <<'SQL'
+          DO $$
+          BEGIN
+            BEGIN
+              INSERT INTO sites (id, organization_id, name, created_at)
+                VALUES ('invalid-site', 'missing-org', 'Invalid restore fixture', now());
+              RAISE EXCEPTION 'Restored site accepted a missing organization';
+            EXCEPTION WHEN foreign_key_violation THEN
+              NULL;
+            END;
+          END;
+          $$;
+          SQL
+
+          restore_ms=$(( $(date +%s%3N) - restore_start ))
+          printf 'PPE_POSTGRES_RESTORE {"backup_ms":%d,"restore_and_verify_ms":%d}\n' \
+            "$backup_ms" "$restore_ms"
+      - name: Check restored schema against models
+        env:
+          DATABASE_URL: postgresql+psycopg://ppe_ci:ppe_ci_nonproduction@127.0.0.1:5432/ppe_restore_ci
+        run: python -m alembic check
