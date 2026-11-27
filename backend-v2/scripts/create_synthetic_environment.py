@@ -17,6 +17,10 @@ def main():
         'PPE_LAB_OWNER_PASSWORD': token_urlsafe(32),
         'PPE_LAB_API_PASSWORD': token_urlsafe(32),
         'PPE_LAB_LOGIN_PASSWORD': token_urlsafe(32),
+        'PPE_LAB_MEDIA_TOKEN': token_urlsafe(32),
+        'PPE_LAB_PUBLISHER_PASSWORD': token_urlsafe(32),
+        'PPE_LAB_READER_PASSWORD': token_urlsafe(32),
+        'PPE_LAB_SRT_PASSPHRASE': token_urlsafe(32),
     }
     try:
         descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

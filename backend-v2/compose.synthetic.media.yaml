@@ -1,0 +1,76 @@
+x-media: &media
+  image: ${COMPOSE_PROJECT_NAME:?Use the generated lab environment}-media
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: ['/tmp:size=32m,nosuid,nodev']
+  mem_limit: 384m
+  pids_limit: 128
+
+services:
+  api:
+    networks: [database, web, media_read]
+    environment:
+      PPE_LAB_MEDIA_TOKEN: ${PPE_LAB_MEDIA_TOKEN:?Generate an environment for the media lab}
+      MEDIA_GATEWAY_ORIGIN: http://127.0.0.1:8445
+      MEDIA_GATEWAY_TOKEN_FILE: /tmp/ppe-lab-preview-token
+    command: [python, -m, tests.synthetic_compose_media, api]
+
+  central-media:
+    <<: *media
+    build:
+      context: .
+      dockerfile: infra/synthetic/Dockerfile.media
+    command: [python, -m, tests.synthetic_compose_media, ingress]
+    networks: [media_read, media_uplink]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PPE_LAB_PUBLISHER_PASSWORD: ${PPE_LAB_PUBLISHER_PASSWORD:?Generate a media lab environment}
+      PPE_LAB_READER_PASSWORD: ${PPE_LAB_READER_PASSWORD:?Generate a media lab environment}
+      PPE_LAB_SRT_PASSPHRASE: ${PPE_LAB_SRT_PASSPHRASE:?Generate a media lab environment}
+    healthcheck:
+      test: [CMD, python, -m, tests.synthetic_compose_media, check-ingress]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  synthetic-site:
+    <<: *media
+    pull_policy: never
+    command: [python, -m, tests.synthetic_compose_media, site]
+    networks: [media_uplink]
+    depends_on:
+      central-media:
+        condition: service_healthy
+    environment:
+      PPE_LAB_PUBLISHER_PASSWORD: ${PPE_LAB_PUBLISHER_PASSWORD:?Generate a media lab environment}
+      PPE_LAB_SRT_PASSPHRASE: ${PPE_LAB_SRT_PASSPHRASE:?Generate a media lab environment}
+
+  gateway-preview:
+    <<: *media
+    pull_policy: never
+    command: [python, -m, tests.synthetic_compose_media, preview]
+    network_mode: service:api
+    depends_on:
+      api:
+        condition: service_healthy
+        restart: true
+      central-media:
+        condition: service_healthy
+    environment:
+      PPE_LAB_MEDIA_TOKEN: ${PPE_LAB_MEDIA_TOKEN:?Generate a media lab environment}
+      PPE_LAB_READER_PASSWORD: ${PPE_LAB_READER_PASSWORD:?Generate a media lab environment}
+    healthcheck:
+      test: [CMD, python, -m, tests.synthetic_compose_media, check-preview]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+networks:
+  media_read:
+    internal: true
+  media_uplink:
+    internal: true

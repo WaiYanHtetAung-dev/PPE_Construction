@@ -16,7 +16,8 @@ projects. In PowerShell from `backend-v2`:
 
 ```powershell
 python scripts/create_synthetic_environment.py .env.synthetic-stack
-$lab = @('--env-file', '.env.synthetic-stack', '-f', 'compose.synthetic.yaml')
+$lab = @('--env-file', '.env.synthetic-stack', '-f', 'compose.synthetic.yaml',
+         '-f', 'compose.synthetic.media.yaml')
 docker compose @lab config --quiet
 docker compose @lab up --build --wait --wait-timeout 90
 $binding = docker compose @lab port frontend 8080
@@ -31,6 +32,15 @@ generated environment selects a new project name and credentials. Avoid
 exporting variables named `PPE_LAB_*` or `COMPOSE_PROJECT_NAME` in the shell
 that runs the lab so Compose uses the generated values.
 
+Select **Check camera status** for **North Synthetic Camera** and wait for
+**Online**. Use **Load video preview** to open a short H.264 clip. The lab
+creates video in the synthetic site container. Its RTSP server listens only on
+that container's loopback. The publisher initiates authenticated, encrypted
+SRT to central MediaMTX, and the gateway reads only the fixed central ingress
+through a local RTSP relay. PostgreSQL, ingress and preview have no host ports.
+If you ran an earlier database-only lab, create a fresh environment file for
+this media run so the seeded camera has the matching gateway identity.
+
 ## Verify
 
 Against a fresh lab, from the same directory:
@@ -39,6 +49,11 @@ Against a fresh lab, from the same directory:
 python -m pip install -r requirements-browser-smoke.txt
 python -m playwright install chromium
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack
+python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state online
+docker compose @lab stop --timeout 10 synthetic-site
+python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state offline
+docker compose @lab start synthetic-site
+python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state online
 ```
 
 The test registers a camera and advances the seeded incident. The
@@ -50,7 +65,7 @@ and checks that the API role cannot insert incidents or alter audit entries.
 
 ```powershell
 docker compose @lab ps -a
-docker compose @lab logs --tail 60 bootstrap api frontend
+docker compose @lab logs --tail 60 bootstrap api frontend central-media gateway-preview synthetic-site
 docker compose @lab down
 ```
 
@@ -60,8 +75,7 @@ file and use it in `$lab`. When you are finished with a specific disposable
 lab and want to erase its database, confirm its project in `docker compose
 @lab ps -a` and run `docker compose @lab down --volumes` with that file.
 
-This lab slice covers the browser, API and PostgreSQL. The signed synthetic
-ONNX and outbound media tests can be run separately using the
+The signed synthetic ONNX suite can be run separately using the
 [outbound media runbook](ADR-006-OUTBOUND-MEDIA.md#reproduce-the-synthetic-stack).
 The published UI uses the real incident read and status routes. Detection
 ingestion policy, evidence access and notifications are tracked under ADR-005

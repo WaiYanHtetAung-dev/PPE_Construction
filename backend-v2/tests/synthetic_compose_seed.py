@@ -11,18 +11,12 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.db.models import Camera, Incident, Organization, OrganizationMembership, Site, User, utcnow
-
-EMAIL = 'operator@ppe-lab.example.com'
-OPERATOR = '8b351059-d530-49d9-8b85-8bac94f01c01'
-NORTH = '8b351059-d530-49d9-8b85-8bac94f01c02'
-SOUTH = '8b351059-d530-49d9-8b85-8bac94f01c03'
-UNASSIGNED = '8b351059-d530-49d9-8b85-8bac94f01c04'
-SECRET = r'[A-Za-z0-9_-]{43}'
+from tests.synthetic_compose_ids import EMAIL, NORTH, NORTH_ALIAS, NORTH_CAMERA, OPERATOR, SECRET_PATTERN, SOUTH, UNASSIGNED
 
 
 def credential(name):
     value = os.environ.get(name, '')
-    if not fullmatch(SECRET, value):
+    if not fullmatch(SECRET_PATTERN, value):
         raise SystemExit('Use credentials from the disposable lab environment generator.')
     return value
 
@@ -33,7 +27,7 @@ def owner_url():
     url = make_url(os.environ.get('DATABASE_URL', ''))
     if (url.query or (url.drivername, url.username, url.host, url.port, url.database) !=
             ('postgresql+psycopg', 'ppe_lab_owner', 'postgres', 5432, 'ppe_lab')
-            or not fullmatch(SECRET, url.password or '')):
+            or not fullmatch(SECRET_PATTERN, url.password or '')):
         raise SystemExit('The bootstrap only accepts the private Compose ppe_lab database.')
     return url
 
@@ -71,6 +65,9 @@ def seed(engine, password):
             db.add(site)
             db.flush()
             camera = Camera(site_id=site.id, name=f'{name} Synthetic Camera', stream_ref=f'stream:lab/{name.lower()}')
+            if org_id == NORTH:
+                camera.id = NORTH_CAMERA
+                camera.stream_ref = NORTH_ALIAS
             db.add(camera)
             db.flush()
             db.add(Incident(organization_id=org_id, site_id=site.id, camera_id=camera.id,

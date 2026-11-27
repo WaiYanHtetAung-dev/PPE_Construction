@@ -1,6 +1,5 @@
 """Run a disposable RTSP camera and authenticated SRT ingress on loopback."""
 
-import json
 import os
 import socket
 import subprocess
@@ -16,8 +15,8 @@ import pytest
 from media_gateway.network_source import central_rtsp_source
 from media_gateway.sampler import FrameSource
 from media_gateway.site_publisher import publish_command
+from tests.synthetic_streams import HOST, camera_command, media_config, permission
 
-HOST = '127.0.0.1'
 QUIET = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL,
          'env': {key: value for key, value in os.environ.items() if key.upper() != 'FFREPORT'}}
 
@@ -75,24 +74,6 @@ def process(*args):
                     child.kill()
 
 
-def media_config(path, rtsp, users, paths, srt=None, metrics=None):
-    settings = dict(logLevel='error', rtspAddress=f'{HOST}:{rtsp}', rtspTransports=['tcp'],
-                    authInternalUsers=users, paths=paths, rtmp=False, hls=False, webrtc=False,
-                    moq=False, srt=srt is not None, metrics=metrics is not None, readTimeout='4s',
-                    pathDefaults={'overridePublisher': False})
-    if srt is not None:
-        settings['srtAddress'] = f'{HOST}:{srt}'
-    if metrics is not None:
-        settings['metricsAddress'] = f'{HOST}:{metrics}'
-    path.touch(mode=0o600, exist_ok=False)
-    path.write_text(json.dumps(settings), encoding='ascii')  # JSON is valid YAML.
-    return path
-
-
-def permission(user, password, action, path=''):
-    return {'user': user, 'pass': password, 'permissions': [{'action': action, 'path': path}]}
-
-
 @contextmanager
 def outbound_fixture(root, *, width, height):
     binary = str(Path(os.environ['PPE_MEDIAMTX']).resolve(strict=True))
@@ -101,10 +82,7 @@ def outbound_fixture(root, *, width, height):
         token_urlsafe(24) for _ in range(7)
     )
     lan_url = f'rtsp://camera:{lan_pass}@{HOST}:{lan}/fixture'
-    fixture = ('ffmpeg', '-nostdin', '-loglevel', 'quiet', '-re', '-f', 'lavfi', '-i',
-               f'testsrc2=size={width}x{height}:rate=10', '-c:v', 'libx264', '-threads', '1',
-               '-preset', 'ultrafast', '-tune', 'zerolatency', '-g', '10', '-f', 'rtsp',
-               '-rtsp_transport', 'tcp', lan_url)
+    fixture = camera_command(lan_url, width, height)
     with TemporaryDirectory(dir=root) as directory:
         root = Path(directory)
         lan_config = media_config(root / 'lan.yml', lan, [permission('camera', lan_pass, action, 'fixture')

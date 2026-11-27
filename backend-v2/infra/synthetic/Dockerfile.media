@@ -1,0 +1,18 @@
+FROM bluenviron/mediamtx:1.21.3@sha256:59e43552f3be43695b70c19424dc2a42fcec18075f88d91561a24ac5d70a586c AS ingress
+FROM python:3.12-slim-trixie
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg socat \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=ingress /mediamtx /usr/local/bin/mediamtx
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+COPY requirements.txt requirements-media-test.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt -r requirements-media-test.txt
+COPY app/__init__.py app/
+COPY app/contracts app/contracts
+COPY inference_worker/__init__.py inference_worker/auth.py inference_worker/
+COPY media_gateway media_gateway
+COPY tests/__init__.py tests/synthetic_compose_media.py tests/synthetic_streams.py tests/synthetic_compose_ids.py tests/
+USER 65532:65532

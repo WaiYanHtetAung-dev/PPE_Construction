@@ -6,7 +6,7 @@ from re import fullmatch
 
 from playwright.sync_api import expect, sync_playwright
 
-from tests.synthetic_compose_seed import EMAIL, NORTH, SOUTH, UNASSIGNED
+from tests.synthetic_compose_ids import EMAIL, NORTH, NORTH_CAMERA, SOUTH, UNASSIGNED
 
 ME = '/api/v1/auth/me'
 
@@ -95,21 +95,60 @@ def verify_dashboard(browser, origin, password):
     expect(organization).to_have_count(0)
 
 
+def verify_media(browser, origin, password, state):
+    page = browser.new_page(service_workers='block')
+    page.route('**/*', lambda route: route.continue_() if route.request.url.startswith(origin + '/') else route.abort())
+    assert page.goto(origin).ok
+    session = login(page, origin, password)
+    organization = page.get_by_role('combobox', name='Organization')
+    expect(organization).to_be_visible()
+    organization.select_option(NORTH)
+    status_button = page.get_by_role('button', name='Check camera status')
+    row = page.get_by_role('row').filter(has_text='North Synthetic Camera').filter(has=status_button)
+    row.get_by_role('button', name='Check camera status').click()
+    north = f'{origin}/api/v1/organizations/{NORTH}/cameras/{NORTH_CAMERA}/media'
+    south = f'{origin}/api/v1/organizations/{SOUTH}/cameras/{NORTH_CAMERA}/media'
+    headers = {'Authorization': 'Bearer ' + session['access_token']}
+    assert page.request.get(north + '/preview').status == 401
+    assert page.request.get(south + '/status', headers=headers).status == 404
+    assert page.request.get(south + '/preview', headers=headers).status == 404
+    expect(row.get_by_text(state.title(), exact=True)).to_be_visible(timeout=25000)
+    if state == 'offline':
+        expect(row.get_by_role('button', name='Load video preview')).to_have_count(0)
+        assert page.request.get(north + '/preview', headers=headers).status == 503
+    else:
+        with page.expect_response(north + '/preview') as playback:
+            row.get_by_role('button', name='Load video preview').click()
+        assert playback.value.status == 200
+        assert playback.value.headers['cache-control'] == 'no-store'
+        page.wait_for_function("document.querySelector('video')?.readyState >= 2")
+    page.get_by_role('button', name='Sign out').click()
+    expect(page.locator('video')).to_have_count(0)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--origin', required=True)
     parser.add_argument('--env-file', required=True, type=Path)
+    parser.add_argument('--media-state', choices=('online', 'offline'))
     args = parser.parse_args()
     if not fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}', args.origin):
         parser.error('Use the published loopback origin of the disposable Compose project')
     settings = dict(line.split('=', 1) for line in args.env_file.read_text(encoding='ascii').splitlines())
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = playwright.chromium.launch(channel='chromium' if args.media_state else None)
         try:
-            verify_dashboard(browser, args.origin, settings['PPE_LAB_LOGIN_PASSWORD'])
+            password = settings['PPE_LAB_LOGIN_PASSWORD']
+            if args.media_state:
+                verify_media(browser, args.origin, password, args.media_state)
+            else:
+                verify_dashboard(browser, args.origin, password)
         finally:
             browser.close()
-    print('PPE_COMPOSE_BROWSER: login, tenant isolation, status persistence, logout and expiry passed')
+    if args.media_state:
+        print(f'PPE_COMPOSE_MEDIA: authorized gateway status {args.media_state} passed')
+    else:
+        print('PPE_COMPOSE_BROWSER: login, tenant isolation, status persistence, logout and expiry passed')
 
 
 if __name__ == '__main__':
