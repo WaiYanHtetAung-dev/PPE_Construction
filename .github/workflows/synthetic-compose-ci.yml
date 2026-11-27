@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   browser-postgres:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -62,5 +62,8 @@ jobs:
           file="$RUNNER_TEMP/.env.synthetic-stack"
           if [[ -f "$file" ]]; then
             docker compose --env-file "$file" -f compose.synthetic.yaml ps -a
+            if [[ "${{ job.status }}" == failure ]]; then
+              docker compose --env-file "$file" -f compose.synthetic.yaml logs --tail 30 bootstrap api frontend
+            fi
             docker compose --env-file "$file" -f compose.synthetic.yaml down --volumes
           fi
