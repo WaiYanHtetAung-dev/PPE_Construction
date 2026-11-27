@@ -1,15 +1,12 @@
 """Disposable loopback camera, site publisher, MediaMTX ingress and browser."""
 
-import json
 import os
 import socket
 import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 from secrets import token_urlsafe
 from threading import Thread
-from time import monotonic, sleep
 
 import httpx
 import pytest
@@ -20,15 +17,11 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db.models import Camera
 from app.db.session import SessionLocal
-from media_gateway.network_source import central_rtsp_source
 from media_gateway.preview_service import create_preview_service
-from media_gateway.site_publisher import publish_command
 from tests.browser_smoke import smoke_origin  # noqa: F401
+from tests.synthetic_outbound_support import HOST, QUIET, outbound_fixture, process, wait_until
 
-HOST = '127.0.0.1'
 ALIAS = 'stream:smoke-camera'
-QUIET = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL,
-         'env': {key: value for key, value in os.environ.items() if key.upper() != 'FFREPORT'}}
 pytestmark = pytest.mark.skipif(os.getenv('PPE_OUTBOUND_RUN') != '1', reason='Requires test MediaMTX and FFmpeg binaries')
 
 
@@ -41,67 +34,6 @@ class MediaHarness:
     token: str = field(repr=False)
     metrics_auth: tuple[str, str] = field(repr=False)
     publisher: list[str] = field(repr=False)
-
-
-def wait_until(check, timeout=15):
-    deadline = monotonic() + timeout
-    while monotonic() < deadline:
-        if check():
-            return
-        sleep(0.1)
-    pytest.fail('Synthetic media did not reach the expected state')
-
-
-def ports():
-    sockets = [socket.socket(socket.AF_INET, mode) for mode in
-               (socket.SOCK_STREAM, socket.SOCK_STREAM, socket.SOCK_STREAM, socket.SOCK_DGRAM)]
-    try:
-        for sock in sockets:
-            sock.bind((HOST, 0))
-        return [sock.getsockname()[1] for sock in sockets]
-    finally:
-        for sock in sockets:
-            sock.close()
-
-
-def listening(port):
-    try:
-        with socket.create_connection((HOST, port), timeout=0.2):
-            return True
-    except OSError:
-        return False
-
-
-@contextmanager
-def process(*args):
-    with subprocess.Popen(args, **QUIET) as child:
-        try:
-            yield child
-        finally:
-            if child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=4)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-
-
-def media_config(path, rtsp, users, paths, srt=None, metrics=None):
-    settings = dict(logLevel='error', rtspAddress=f'{HOST}:{rtsp}', rtspTransports=['tcp'],
-                    authInternalUsers=users, paths=paths, rtmp=False, hls=False, webrtc=False,
-                    moq=False, srt=srt is not None, metrics=metrics is not None, readTimeout='4s',
-                    pathDefaults={'overridePublisher': False})
-    if srt is not None:
-        settings['srtAddress'] = f'{HOST}:{srt}'
-    if metrics is not None:
-        settings['metricsAddress'] = f'{HOST}:{metrics}'
-    path.touch(mode=0o600, exist_ok=False)
-    path.write_text(json.dumps(settings), encoding='ascii')  # JSON is valid YAML.
-    return path
-
-
-def permission(user, password, action, path=''):
-    return {'user': user, 'pass': password, 'permissions': [{'action': action, 'path': path}]}
 
 
 @contextmanager
@@ -208,42 +140,19 @@ def check_browser(origin, camera, organization_path, admin_account):
 @pytest.fixture
 def mount_media(smoke_origin, admin_account, tmp_path, monkeypatch, request):
     # Request smoke_origin first so its synthetic camera row is available to bind.
-    binary = str(Path(os.environ['PPE_MEDIAMTX']).resolve(strict=True))
     with SessionLocal() as db:
         camera = db.scalar(select(Camera.id).where(Camera.stream_ref == ALIAS))
-    lan, central, metrics, srt = ports()
-    credentials = [token_urlsafe(24) for _ in range(8)]
-    lan_pass, pub_pass, other_pass, reader_pass, metrics_pass, media_token, phrase, other_phrase = credentials
-    lan_url = f'rtsp://camera:{lan_pass}@{HOST}:{lan}/fixture'
-    lan_config = media_config(tmp_path / 'lan.yml', lan, [permission('camera', lan_pass, action, 'fixture')
-                             for action in ('publish', 'read')], {'fixture': {'source': 'publisher'}})
-    central_config = media_config(tmp_path / 'central.yml', central, [
-        permission('publisher-one', pub_pass, 'publish', 'pilot-one'),
-        permission('publisher-two', other_pass, 'publish', 'pilot-two'),
-        permission('reader', reader_pass, 'read', 'pilot-one'),
-        permission('observer', metrics_pass, 'metrics'),
-    ], {'pilot-one': {'source': 'publisher', 'srtPublishPassphrase': phrase},
-        'pilot-two': {'source': 'publisher', 'srtPublishPassphrase': other_phrase}}, srt=srt, metrics=metrics)
-    fixture = ('ffmpeg', '-nostdin', '-loglevel', 'quiet', '-re', '-f', 'lavfi', '-i',
-               'testsrc2=size=160x96:rate=10', '-c:v', 'libx264', '-threads', '1', '-preset', 'ultrafast',
-               '-tune', 'zerolatency', '-g', '10', '-f', 'rtsp', '-rtsp_transport', 'tcp', lan_url)
-    command = publish_command(lan_url, HOST, srt, 'pilot-one', 'publisher-one', pub_pass, phrase)
-    forged = publish_command(lan_url, HOST, srt, 'pilot-two', 'publisher-one', pub_pass, other_phrase)
-    wrong_key = publish_command(lan_url, HOST, srt, 'pilot-one', 'publisher-one', pub_pass, other_phrase)
-    source = central_rtsp_source(HOST, central, 'pilot-one', 'reader', reader_pass)
-    app = create_preview_service({camera: (ALIAS, source)}, media_token)
+    media_token = token_urlsafe(24)
     token_file = tmp_path / 'gateway-token'
     token_file.touch(mode=0o600, exist_ok=False)
+    request.addfinalizer(lambda: token_file.unlink(missing_ok=True))
     token_file.write_text(media_token, encoding='ascii')
-    for secret_path in (token_file, lan_config, central_config):
-        request.addfinalizer(lambda path=secret_path: path.unlink(missing_ok=True))
-    with process(binary, str(lan_config)), process(binary, str(central_config)):
-        wait_until(lambda: listening(lan) and listening(central))
-        with process(*fixture), run_preview(app) as origin:
-            sleep(1.5)
-            reject_publisher(forged)
-            reject_publisher(wrong_key)
+    with outbound_fixture(tmp_path, width=160, height=96) as media:
+        app = create_preview_service({camera: (ALIAS, media.source)}, media_token)
+        with run_preview(app) as origin:
+            reject_publisher(media.forged_publisher)
+            reject_publisher(media.wrong_key_publisher)
             monkeypatch.setattr(get_settings(), 'media_gateway_origin', origin)
             monkeypatch.setattr(get_settings(), 'media_gateway_token_file', str(token_file))
             yield MediaHarness(origin, camera, f'organizations/{admin_account["org_id"]}',
-                               f'http://{HOST}:{metrics}/metrics', media_token, ('observer', metrics_pass), command)
+                               media.metrics_origin, media_token, media.metrics_auth, media.publisher)

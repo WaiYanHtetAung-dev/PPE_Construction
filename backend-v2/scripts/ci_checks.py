@@ -81,7 +81,7 @@ def stack(report=None):
     os.environ['PPE_STACK_RUN'] = '1'
     if report is not None:
         os.environ['PPE_STACK_REPORT'] = str(report.resolve())
-    run('-m', 'pytest', '-q', '-s', 'tests/synthetic_assignment_stack.py')
+    run('-m', 'pytest', '-q', '-s', '--tb=short', 'tests/synthetic_assignment_stack.py')
 
 
 if __name__ == '__main__':

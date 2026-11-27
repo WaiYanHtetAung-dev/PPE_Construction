@@ -92,6 +92,23 @@ install `requirements-media-test.txt` in the same environment, and use an
 FFmpeg build with `libx264`, RTSP and `srt`. The loopback harness tests protocol
 boundaries; it does not exercise a site firewall or the encrypted WAN tunnel.
 
+The [backend workflow](../../.github/workflows/backend-v2-ci.yml) also sends a
+decoded outbound frame through the ADR-009 resolver and the independent CPU
+ONNX worker using signed synthetic fixtures. It exercises attribution, queued
+frame purge, in-flight response rejection on revocation, continued inference on
+a second camera and recovery after re-verification of the same model version.
+To include this case in the integrated suite, run from `backend-v2` on Linux
+with the disposable PostgreSQL and read-only mount prerequisites in
+[the integrated stack runbook](INTEGRATED_TEST_STACK_EXECUTION.md):
+
+```sh
+python scripts/ci_checks.py postgres
+PPE_MEDIAMTX=/absolute/path/to/mediamtx python scripts/ci_checks.py stack --report /tmp/synthetic-pilot.html
+```
+
+Look for `PPE_OUTBOUND_ONNX` in the test output. The existing MP4-only stack
+command remains available when `PPE_MEDIAMTX` is unset.
+
 ## Next pilot deployment, after approval
 
 1. Record one to three approved camera IDs and site subnets. Allocate a central

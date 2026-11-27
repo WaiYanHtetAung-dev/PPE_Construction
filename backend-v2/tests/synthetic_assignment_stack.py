@@ -41,6 +41,7 @@ from media_gateway.inference_dispatch import DispatchError, InferenceDispatcher
 from media_gateway.sampler import sample_camera
 from media_gateway.video_source import local_video_source
 from tests.media_decoder_integration import HEIGHT, WIDTH, generate_clip
+from tests.synthetic_outbound_support import outbound_fixture, process
 from tests.synthetic_pilot_report import render_report
 from tests.synthetic_reconnect_soak import run_reconnect_soak
 from tests.synthetic_stack_support import listener, paced_video, readonly_bind, temporary_tls, wait_for, worker_process
@@ -510,6 +511,86 @@ async def verify_stack(stack, root, owner, context, control_url, worker, worker_
         'camera_samples_offered': [queue.offers[camera] for camera in camera_ids],
         'camera_samples_dropped_before_dispatch': [queue.offers[camera] - queue.taken[camera] for camera in camera_ids],
     }, sort_keys=True))
+
+    async def check_outbound():
+        scope = scopes[1]
+
+        async def dispatch_network_frame():
+            await wait_for(lambda: second in queue._pending, 12)
+            result = await next_frame()
+            assert (result.assignment.organization_id, result.assignment.site_id, result.assignment.camera_id) == (
+                scope.organization_id, scope.site_id, scope.camera_id)
+            assert result.assignment.model_version_id == UUID(model_a.id)
+            assert (result.response.model_key, result.response.model_version) == (model_a.model_key, model_a.version)
+            assert result.frame.camera_id == second and result.frame.received_at.tzinfo == UTC
+            assert (result.frame.width, result.frame.height) == (WIDTH, HEIGHT)
+            assert result.frame.source_timestamp >= 0 and result.frame.sample_interval == 0.3
+            assert result.response.detections
+            assert all(CLASS_MAP[item.original_class] == item.class_key for item in result.response.detections)
+            return result
+
+        assert queue.take() is None
+        with outbound_fixture(root, width=WIDTH, height=HEIGHT) as media, process(*media.publisher) as publisher:
+            assert await resolver.refresh(second)
+            active = resolver.current(second)
+            source = asyncio.create_task(sample_camera(second, media.source, queue,
+                                                       sample_interval=0.3, frame_timeout=5,
+                                                       retry_initial=0.5, retry_max=1.4))
+            try:
+                initial = await dispatch_network_frame()
+                assert resolver.current(second, initial.assignment_epoch) == active
+                await wait_for(lambda: second in queue._pending, 5)
+                worker_transport.received.clear()
+                worker_transport.release.clear()
+                worker_transport.hold = True
+                retained = asyncio.create_task(dispatcher.dispatch_one())
+                try:
+                    await asyncio.wait_for(worker_transport.received.wait(), 4)
+                    # Leave another frame queued while the real worker response is held.
+                    await wait_for(lambda: second in queue._pending, 3)
+                    revoke_model_a(active.generation)
+                    assert not await resolver.refresh(second)
+                    assert resolver.current(second) is None and second not in queue._pending
+                    worker_transport.release.set()
+                    with pytest.raises(DispatchError, match='assignment_invalidated'):
+                        await retained
+                finally:
+                    worker_transport.hold = False
+                    worker_transport.release.set()
+                    await cancel_poll(retained)
+
+                calls = len(worker_transport.starts)
+                offers = queue.offers[second]
+                await wait_for(lambda: queue.offers[second] > offers, 5)
+                assert await dispatcher.dispatch_one() is None and len(worker_transport.starts) == calls
+                assert list((frames_source / 'frames').iterdir()) == []
+
+                assert await resolver.refresh(third)
+                await sample(third)
+                other = await next_frame()
+                assert other.frame.camera_id == third and other.assignment.camera_id == scopes[2].camera_id
+                assert other.assignment.model_version_id == UUID(model_b.id)
+
+                new_generation, _ = promote_model_a()
+                assert new_generation > active.generation and await resolver.refresh(second)
+                restored = resolver.current(second)
+                assert (restored.revision, restored.generation) == (active.revision, new_generation)
+                final = await dispatch_network_frame()
+                assert resolver.current(second, final.assignment_epoch) == restored
+                assert final.assignment_epoch != initial.assignment_epoch
+                assert final.frame.sampled_monotonic > initial.frame.sampled_monotonic
+                assert len({row.response.frame_id for row in (initial, other, final)}) == 3
+                assert len({row.response.request_id for row in (initial, other, final)}) == 3
+                assert publisher.poll() is None
+            finally:
+                await cancel_poll(source)
+                queue.discard(second)
+        assert list((frames_source / 'frames').iterdir()) == []
+        print('PPE_OUTBOUND_ONNX: attributed, revoked, unaffected camera continued, reverified')
+
+    if os.getenv('PPE_MEDIAMTX'):
+        async with asyncio.timeout(45):
+            await check_outbound()
 
     revision = 1
     for paced in (False, True):

@@ -66,9 +66,11 @@ jobs:
           cache: pip
           cache-dependency-path: backend-v2/requirements*.txt
       - run: python -m pip install -r requirements-dev.txt -r requirements-inference-cpu.txt -r requirements-media-test.txt
+      - name: Install synthetic media tools
+        run: sh scripts/install-synthetic-media-ci.sh
       - run: python scripts/ci_checks.py postgres
       - name: Exercise disposable HTTPS assignment and ONNX stack
-        run: python scripts/ci_checks.py stack --report "$RUNNER_TEMP/synthetic-pilot.html"
+        run: PPE_MEDIAMTX="$RUNNER_TEMP/mediamtx" python scripts/ci_checks.py stack --report "$RUNNER_TEMP/synthetic-pilot.html"
       - name: Upload synthetic pilot diagnostics
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
