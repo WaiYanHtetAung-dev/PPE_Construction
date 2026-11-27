@@ -10,6 +10,7 @@ import ssl
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from traceback import extract_tb
 from uuid import UUID, uuid4
 
 from tests.synthetic_compose_ids import NORTH, NORTH_ALIAS, NORTH_CAMERA
@@ -47,8 +48,10 @@ def readers(engine, owner):
         ],
     }
     with engine.begin() as db:
-        if db.scalar(text("SELECT to_regrole('ppe_model_verifier')")) is None:
-            db.exec_driver_sql('CREATE ROLE ppe_model_verifier NOLOGIN')
+        for role in ('ppe_model_verifier', 'ppe_assignment_operator'):
+            if db.scalar(text('SELECT to_regrole(:role)'), {'role': role}) is None:
+                db.exec_driver_sql(f'CREATE ROLE {role} NOLOGIN')
+        db.exec_driver_sql('GRANT ppe_assignment_operator TO ppe_lab_owner')
         for name, permissions in grants.items():
             role, password = 'ppe_lab_' + name, token_urlsafe(32)
             if db.scalar(text('SELECT to_regrole(:role)'), {'role': role}) is None:
@@ -245,10 +248,14 @@ def main():
     os.umask(0o077)
     try:
         actions[args.action]()
-    except Exception:
+    except Exception as error:
         if args.action == 'probe':
             raise
-        raise SystemExit(f'Synthetic ONNX service {args.action} failed') from None
+        location = extract_tb(error.__traceback__)[-1]
+        raise SystemExit(
+            f'Synthetic ONNX service {args.action} failed '
+            f'({type(error).__name__} at {Path(location.filename).name}:{location.lineno})'
+        ) from None
 
 
 if __name__ == '__main__':
