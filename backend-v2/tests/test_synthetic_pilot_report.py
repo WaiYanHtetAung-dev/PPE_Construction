@@ -26,7 +26,11 @@ def measurements():
         'peak_pending': 2, 'peak_pending_bytes': 6144, 'queue_replacements': 1}],
                  'cameras': [{'camera': 1, 'offered': 11, 'emitted': 8, 'replaced': 2, 'rejected': 0, 'purged': 0,
                               'pending_at_shutdown': 1, 'in_flight_at_shutdown': 0}]}
-    return trials, summary, restart, reconnect
+    capacity = [{'peak_pending': 2, 'peak_pending_bytes': 6144, 'cameras': [
+        {'emitted': 12, 'emitted_fps': 1, 'max_result_gap_ms': 1100, 'queue_replacements': 4},
+        {'emitted': 18, 'emitted_fps': 1.5, 'max_result_gap_ms': 800, 'queue_replacements': 2},
+    ]}]
+    return trials, summary, restart, reconnect, capacity
 
 
 def test_report_labels_fixtures_and_summarizes_measured_windows(measurements):
@@ -38,12 +42,13 @@ def test_report_labels_fixtures_and_summarizes_measured_windows(measurements):
     assert 'Camera 1 (Frame stall)<br>Camera 2 (End of stream)' in page
     assert '<td>2<br>4</td>' in page and '<td>1.100<br>1.200</td>' in page
     assert '<td>9</td><td>2.25</td>' in page and '<td>2 <small>6.0 KiB</small></td>' in page
+    assert '<td>30</td><td>1.00</td><td>1.100</td><td>6</td>' in page
     assert 'default-src \'none\'' in page
     assert '<script' not in page and 'private-fixture-identifier' not in page
 
 
 def test_report_rejects_markup_in_a_numeric_metric(measurements):
-    trials, _, _, _ = measurements
+    trials, _, _, _, _ = measurements
     for trial in trials:
         trial['cameras'][0]['source_fps'] = '<img src="https://example.invalid">'
     with pytest.raises(ValueError, match='format code'):

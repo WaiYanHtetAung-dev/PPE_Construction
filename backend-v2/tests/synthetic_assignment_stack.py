@@ -51,6 +51,7 @@ pytestmark = pytest.mark.skipif(os.getenv('PPE_STACK_RUN') != '1', reason='Use t
 
 CLASS_MAP = {label: detection(i, 1.0, (1, 1, 2, 2)).class_key for i, label in enumerate(LABELS)}
 FRAME_BYTES = WIDTH * HEIGHT * 3
+FIXTURE_RATES = (10, 24, 30)
 REPEAT_CYCLES = 3
 SAMPLING_COMPARISON_SECONDS = 12
 SAMPLING_INTERVALS = (0.2, 0.3, 0.4)
@@ -109,6 +110,24 @@ def seed(owner, model_root, signer):
     return cameras, models, principal, token, admin.id
 
 
+def provision_capacity_cameras(owner, pilot_scopes):
+    """Mirror the pilot's model mix and sites in the disposable database."""
+    scopes = list(pilot_scopes)
+    organization = str(scopes[0].organization_id)
+    with Session(owner) as db, db.begin():
+        for index, scope in enumerate(pilot_scopes, 1):
+            pilot = db.get(CameraModelAssignment, str(scope.camera_id))
+            camera = Camera(site_id=str(scope.site_id), name=f'Synthetic capacity camera {index}',
+                            stream_ref=f'stream:stack-capacity/{index}')
+            db.add(camera)
+            db.flush()
+            db.add(CameraModelAssignment(camera_id=camera.id, model_version_id=pilot.model_version_id))
+            scopes.append(CameraScope(scope.organization_id, scope.site_id, UUID(camera.id)))
+        principal = provision(db, organization, {str(scope.camera_id): str(scope.site_id) for scope in scopes})
+        token = rotate(db, principal)
+    return scopes, token
+
+
 def sign_manifest(root, model, signer):
     now = datetime.now(UTC)
     payload = Manifest(model_version_id=UUID(model.id), model_key=model.model_key, version=model.version,
@@ -154,8 +173,9 @@ class MeasuredTransport(httpx.AsyncHTTPTransport):
 
 
 class MeasuredQueue(FrameQueue):
-    def __init__(self):
-        super().__init__(max_cameras=3, max_bytes=3 * FRAME_BYTES, max_frame_bytes=FRAME_BYTES)
+    def __init__(self, camera_count=3):
+        super().__init__(max_cameras=camera_count, max_bytes=camera_count * FRAME_BYTES,
+                         max_frame_bytes=FRAME_BYTES)
         self.offers = Counter()
         self.taken = Counter()
         self.losses = Counter()
@@ -329,7 +349,7 @@ async def verify_stack(stack, root, owner, context, control_url, worker, worker_
         transport=worker_transport, timeout=10,
     ))
     paths = {}
-    for camera, fps in zip(camera_ids, (10, 24, 30)):
+    for camera, fps in zip(camera_ids, FIXTURE_RATES, strict=True):
         paths[camera] = root / f'clip-{fps}.mp4'
         generate_clip(paths[camera], fps)
 
@@ -517,9 +537,38 @@ async def verify_stack(stack, root, owner, context, control_url, worker, worker_
     async with InferenceDispatcher(queue, resolver, frames_source, worker_origin=worker_url,
                                    token=worker_secret, transport=transport, timeout=1.5) as probe:
         restart = await verify_worker_restart(worker, resolver, probe, queue, paths, frames_source / 'frames')
+    capacity_scopes, capacity_token = provision_capacity_cameras(owner, scopes)
+    assert (await snapshot(capacity_scopes[len(scopes)], new_token)).status_code == 404
+    capacity = await compare_camera_counts(capacity_scopes, paths, context, control_url, capacity_token,
+                                           worker_url, worker_secret, frames_source)
+    print('PPE_STACK_CAPACITY ' + json.dumps(capacity, sort_keys=True))
     assert list((frames_source / 'frames').iterdir()) == []
     if report := os.getenv('PPE_STACK_REPORT'):
-        Path(report).write_text(render_report(trials, summary, restart, reconnect), encoding='utf-8')
+        Path(report).write_text(render_report(trials, summary, restart, reconnect, capacity), encoding='utf-8')
+
+
+async def compare_camera_counts(scopes, pilot_paths, context, control_url, token, worker_url, worker_secret, frames):
+    counts = (len(pilot_paths), len(scopes))
+    fixture_paths = tuple(pilot_paths.values()) * 2
+    fixture_rates = FIXTURE_RATES * 2
+    windows = []
+    for block, order in enumerate((counts, counts[::-1]), 1):
+        for count in order:
+            queue = MeasuredQueue(count)
+            paths = {str(scope.camera_id): path
+                     for scope, path in zip(scopes[:count], fixture_paths[:count], strict=True)}
+            async with (
+                asyncio.timeout(45),
+                AssignmentResolver(queue, scopes[:count], control_origin=control_url, token=token,
+                                   supported_class_maps=[CLASS_MAP],
+                                   transport=httpx.AsyncHTTPTransport(verify=context, trust_env=False)) as resolver,
+                InferenceDispatcher(queue, resolver, frames, worker_origin=worker_url, token=worker_secret,
+                                    transport=httpx.AsyncHTTPTransport(verify=context, trust_env=False)) as dispatcher,
+            ):
+                window = await compare_sampling_interval(resolver, dispatcher, queue, paths, 0.3,
+                                                         input_rates=fixture_rates[:count])
+            windows.append(dict(window, block=block))
+    return windows
 
 
 async def verify_worker_restart(worker, resolver, dispatcher, queue, paths, staged):
@@ -654,11 +703,15 @@ def summarize_sampling_trials(trials):
     }
 
 
-async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval):
+async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval, *, input_rates=FIXTURE_RATES):
     """Use the same eligible bindings and paced sources without artificial holds."""
     cameras = tuple(paths)
-    assert all(await asyncio.gather(*(resolver.refresh(camera) for camera in cameras)))
+    # Bootstrap within the listener's concurrency limit before staggered polling.
+    for camera in cameras:
+        assert await resolver.refresh(camera)
     age_by_camera = {camera: [] for camera in cameras}
+    last_result = {}
+    largest_gap = {}
     source_frames = Counter()
     warmed = set()
     measuring = False
@@ -685,29 +738,36 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
                 assert row.frame.sample_interval == interval
                 warmed.add(camera)
                 if measuring:
-                    age = clock() - row.frame.sampled_monotonic
+                    completed = clock()
+                    age = completed - row.frame.sampled_monotonic
                     assert age >= 0
                     age_by_camera[camera].append(age)
+                    largest_gap[camera] = max(largest_gap.get(camera, 0), completed - last_result[camera])
+                    last_result[camera] = completed
             await asyncio.sleep(0.02)
 
     tasks = [asyncio.create_task(resolver.run()), asyncio.create_task(consume())]
-    for (camera, path), fps in zip(paths.items(), (10, 24, 30), strict=True):
+    for (camera, path), fps in zip(paths.items(), input_rates, strict=True):
         record = observe(camera)
         tasks.append(asyncio.create_task(sample_camera(
             camera, lambda path=path, fps=fps, record=record: paced_video(path, fps, record), queue,
             sample_interval=interval, frame_timeout=4, retry_initial=0.7, retry_max=1.4,
         )))
     try:
-        await wait_for(lambda: len(warmed) == len(cameras), 6)
+        await wait_for(lambda: len(warmed) == len(cameras), 8)
         await asyncio.sleep(3)
         before_offers, before_losses = queue.offers.copy(), queue.losses.copy()
+        queue.reset_pending_peak()
         started = clock()
+        last_result.update(dict.fromkeys(cameras, started))
         measuring = True
         await asyncio.sleep(SAMPLING_COMPARISON_SECONDS)
-        elapsed = clock() - started
+        finished = clock()
+        elapsed = finished - started
         measuring = False
+        peak_pending, peak_pending_bytes = queue.peak_pending, queue.peak_pending_bytes
         offers, losses = queue.offers - before_offers, queue.losses - before_losses
-        assert all(age_by_camera.values())
+        assert all(len(ages) >= 2 for ages in age_by_camera.values())
         assert not any(reason == 'replacement_held_response' for _, reason in losses)
     finally:
         for task in tasks:
@@ -721,6 +781,8 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
     return {
         'sample_interval_s': interval,
         'measurement_s': round(elapsed, 3),
+        'peak_pending': peak_pending,
+        'peak_pending_bytes': peak_pending_bytes,
         'cameras': [{
             'input_target_fps': fps,
             'source_fps': round(source_frames[camera] / elapsed, 2),
@@ -729,12 +791,13 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
             'emitted_fps': round(len(age_by_camera[camera]) / elapsed, 2),
             'median_sample_to_result_ms': round(median(age_by_camera[camera]) * 1000, 2),
             'max_sample_to_result_ms': round(max(age_by_camera[camera]) * 1000, 2),
+            'max_result_gap_ms': round(max(largest_gap[camera], finished - last_result[camera]) * 1000, 2),
             'queue_replacements': sum(losses[camera, reason] for reason in (
                 'replacement_dispatch_busy', 'replacement_idle',
             )),
             'policy_rejections': losses[camera, 'policy_rejected'],
             'queue_purges': losses[camera, 'purge_other'],
-        } for camera, fps in zip(cameras, (10, 24, 30), strict=True)],
+        } for camera, fps in zip(cameras, input_rates, strict=True)],
     }
 
 

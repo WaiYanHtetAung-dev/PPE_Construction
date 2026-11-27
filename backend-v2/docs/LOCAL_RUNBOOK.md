@@ -61,7 +61,9 @@ ZIP into the workspace (for example under `.venv`) and open
 sampling and result rates, frame drops, and time to the first fresh result
 after restarting the synthetic worker. The source reconnect soak section shows
 six single-source outages and three overlapping outages, peer inference rates,
-queue pressure, and per-camera recovery. The report opens directly from disk.
+queue pressure, and per-camera recovery. The three- and six-camera comparison
+shows total results, the lowest per-camera result rate, and queue pressure at
+0.3 s sampling. The report opens directly from disk.
 
 On a disposable Linux runner with the stack prerequisites, generate the same
 report from `backend-v2`:

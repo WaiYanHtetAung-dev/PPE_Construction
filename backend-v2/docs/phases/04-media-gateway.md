@@ -263,6 +263,20 @@ emitted result, replacement, rejection, purge, or work remaining at shutdown.
 The source faults are injected around actual local-video replay. Network and
 RTSP recovery require separate testing.
 
+`PPE_STACK_CAPACITY` compares three and six concurrent synthetic sources at
+0.3 s sampling in two blocks (3/6, then 6/3). Each window allows three seconds
+of warm-up after all sources return an initial result, followed by 12 seconds
+of measurement. Three added camera fixtures mirror the original input rates,
+sites and eligible model mix. A separate test workload credential covers all
+six; the original pilot credential must receive a 404 for an added camera.
+Each run uses a fresh resolver and a queue with one pending slot per camera
+and the corresponding fixed byte limit. Every camera must emit at least two
+validated results during the measurement window. The report includes total
+results, the lowest per-camera result rate, the longest gap including window
+edges, queue peaks and replacements. Per-camera rates and sample ages are in
+the CI log. These short loopback CPU runs establish a synthetic comparison;
+50–100 camera capacity and site-to-site performance need separate evidence.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.

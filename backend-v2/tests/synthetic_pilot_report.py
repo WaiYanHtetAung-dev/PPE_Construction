@@ -3,7 +3,7 @@
 from statistics import median
 
 
-def render_report(trials, summary, restart, reconnect):
+def render_report(trials, summary, restart, reconnect, capacity):
     interval = restart['sample_interval_s']
     windows = [trial for trial in trials if trial['sample_interval_s'] == interval]
     camera_windows = zip(*(trial['cameras'] for trial in windows), strict=True)
@@ -45,6 +45,16 @@ def render_report(trials, summary, restart, reconnect):
           <td>{row['pending_at_shutdown']:d}</td><td>{row['in_flight_at_shutdown']:d}</td></tr>'''
         for row in reconnect['cameras']
     )
+    capacity_rows = []
+    for run, window in enumerate(capacity, 1):
+        cameras = window['cameras']
+        results = sum(camera['emitted'] for camera in cameras)
+        slowest = min(camera['emitted_fps'] for camera in cameras)
+        gap = max(camera['max_result_gap_ms'] for camera in cameras) / 1000
+        replacements = sum(camera['queue_replacements'] for camera in cameras)
+        capacity_rows.append(f'''<tr><th scope="row">{run:d}</th><td>{len(cameras):d}</td>
+          <td>{results:d}</td><td>{slowest:.2f}</td><td>{gap:.3f}</td><td>{replacements:d}</td>
+          <td>{window['peak_pending']:d} <small>{window['peak_pending_bytes'] / 1024:.1f} KiB</small></td></tr>''')
 
     return f'''<!doctype html>
 <html lang="en">
@@ -136,6 +146,19 @@ def render_report(trials, summary, restart, reconnect):
         <tbody>{soak_rows}</tbody>
       </table>
     </div>
+  </section>
+  <section aria-labelledby="capacity-heading">
+    <h2 id="capacity-heading">Three- and six-camera comparison</h2>
+    <div class="table-wrap" role="region" aria-labelledby="capacity-heading" tabindex="0">
+      <table aria-labelledby="capacity-heading">
+        <thead><tr><th scope="col">Window</th><th scope="col">Cameras</th><th scope="col">Results</th>
+          <th scope="col">Lowest results / s per camera</th><th scope="col">Longest result gap (s)</th>
+          <th scope="col">Replaced</th><th scope="col">Peak queued</th></tr></thead>
+        <tbody>{''.join(capacity_rows)}</tbody>
+      </table>
+    </div>
+    <p class="note">Four steady windows at {interval:.1f} s sampling. Result gaps include the edges of each
+      window. Queue peaks count pending frame payloads.</p>
   </section>
 </main>
 </body>
