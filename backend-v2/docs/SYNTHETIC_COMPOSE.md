@@ -48,6 +48,13 @@ read-only. Internal HTTPS is pinned to a disposable CA. The snapshot and
 eligibility listeners use separate read-only PostgreSQL roles. The fixture's
 signing key exists only in the bootstrap process.
 
+As a North organization admin, select **View model assignment** on the camera
+row to see the configured model key, version and assignment revision. The
+dashboard requests these details only when opened or refreshed. The assignment
+display describes the saved selection. The ONNX probe separately verifies
+current eligibility and inference. South's viewer role has no assignment
+control.
+
 ## Verify
 
 Against a fresh lab, from the same directory:

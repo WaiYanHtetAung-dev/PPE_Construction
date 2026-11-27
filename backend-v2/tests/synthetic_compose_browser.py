@@ -147,10 +147,24 @@ def verify_probe_incident(browser, origin, password):
     fixture = page.get_by_text(PROBE_VIOLATION.replace('_', ' '), exact=True)
     expect(fixture).to_be_visible()
     expect(fixture).to_have_count(1)
+    model_path = f'{origin}/api/v1/organizations/{NORTH}/cameras/{NORTH_CAMERA}/model'
+    assert page.request.get(model_path).status == 401
+    assert page.request.get(model_path.replace(NORTH, SOUTH), headers=headers).status == 404
+    camera = page.locator('#cameras').get_by_role('row').filter(has_text='North Synthetic Camera')
+    with page.expect_response(model_path) as assignment:
+        camera.get_by_role('button', name='View model assignment').click()
+    assert assignment.value.status == 200
+    assert set(assignment.value.json()['model_version']) == {'id', 'model_key', 'version'}
+    assigned_model = camera.get_by_text('synthetic-compose · Version 1', exact=True)
+    expect(assigned_model).to_be_visible()
+    expect(camera.get_by_text('Assignment revision 0', exact=True)).to_be_visible()
     organization.select_option(SOUTH)
     expect(page.get_by_text('South Synthetic Camera', exact=True).first).to_be_visible()
     expect(fixture).to_have_count(0)
+    expect(assigned_model).to_have_count(0)
+    expect(page.get_by_role('button', name='View model assignment')).to_have_count(0)
     print('PPE_COMPOSE_INCIDENT_BROWSER: exactly one probe incident in the authorized organization')
+    print('PPE_COMPOSE_MODEL_BROWSER: assigned model visible only to the authorized organization admin')
 
 
 def main():

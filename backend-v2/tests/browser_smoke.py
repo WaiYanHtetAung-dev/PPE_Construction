@@ -124,6 +124,19 @@ def test_same_origin_session_and_data(smoke_origin, admin_account):
         assert updated.value.status == 200
         expect(row.get_by_text('acknowledged', exact=True)).to_be_visible()
 
+        status = f'{smoke_origin}{prefix}/cameras/*/model'
+        model_row = page.locator('#cameras').get_by_role('row').filter(has_text='Smoke Test Camera')
+        assert not any(url.endswith('/model') for url in responses)
+        page.route(status, lambda route: route.fulfill(status=503))
+        model_row.get_by_role('button', name='View model assignment').click()
+        expect(model_row.get_by_role('alert')).to_have_text('Could not load the model assignment.')
+        page.unroute(status)
+        with page.expect_response(status) as assignment:
+            model_row.get_by_role('button', name='Refresh model assignment').click()
+        assert assignment.value.status == 200
+        expect(model_row.get_by_text('No model assigned', exact=True)).to_be_visible()
+        expect(model_row.get_by_text('Assignment revision 0', exact=True)).to_be_visible()
+
         sites_url = f'{smoke_origin}{prefix}/sites'
         page.route(sites_url, lambda route: route.fulfill(status=503, json={'detail': 'Unavailable'}))
         page.get_by_role('button', name='Refresh data').click()
@@ -165,12 +178,17 @@ def test_switch_organization_and_handle_unauthorized(smoke_origin, admin_account
             organization.select_option(admin_account['org_id'])
         camera = page.get_by_text('Smoke Test Camera', exact=True).first
         expect(camera).to_be_visible()
+        page.get_by_role('button', name='View model assignment').click()
+        assignment = page.get_by_text('No model assigned', exact=True)
+        expect(assignment).to_be_visible()
 
         other_sites = f'{smoke_origin}/api/v1/organizations/{other_id}/sites'
         with page.expect_response(other_sites) as switched:
             organization.select_option(other_id)
         assert switched.value.status == 200
         expect(camera).to_have_count(0)
+        expect(assignment).to_have_count(0)
+        expect(page.get_by_role('columnheader', name='Assigned model')).to_have_count(0)
         expect(page.get_by_text('smoke-violation', exact=True)).to_have_count(0)
 
         page.route(other_sites, lambda route: route.fulfill(status=401))

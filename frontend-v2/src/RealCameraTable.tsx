@@ -1,6 +1,7 @@
 
 import { useState } from "react";
 import CameraMediaPreview from "./CameraMediaPreview";
+import CameraModelAssignment from "./CameraModelAssignment";
 import { Card, Icon, SectionHeader, StatusPill } from "./components/ui";
 
 type Site = {
@@ -20,13 +21,15 @@ type Props = {
   sites: Site[];
   cameras: Camera[];
   organizationId: string;
+  isOrgAdmin: boolean;
   token: string;
   expireSession: () => void;
 };
 
-export default function RealCameraTable({ sites, cameras, organizationId, token, expireSession }: Props) {
+export default function RealCameraTable({ sites, cameras, organizationId, isOrgAdmin, token, expireSession }: Props) {
   const [search, setSearch] = useState("");
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
+  const [modelCamera, setModelCamera] = useState<string | null>(null);
 
   const filtered = cameras.filter((camera) => {
     const site = sites.find((s) => s.id === camera.site_id);
@@ -73,6 +76,7 @@ export default function RealCameraTable({ sites, cameras, organizationId, token,
                 <th>Camera</th>
                 <th>Site</th>
                 <th>Configuration</th>
+                {isOrgAdmin && <th>Assigned model</th>}
                 <th>Live health</th>
                 <th>Stream reference</th>
               </tr>
@@ -108,6 +112,19 @@ export default function RealCameraTable({ sites, cameras, organizationId, token,
                       </StatusPill>
                     </td>
 
+                    {isOrgAdmin && (
+                      <td>
+                        {modelCamera === camera.id ? (
+                          <CameraModelAssignment cameraId={camera.id} organizationId={organizationId}
+                            token={token} expireSession={expireSession} />
+                        ) : (
+                          <button type="button" onClick={() => setModelCamera(camera.id)}>
+                            View model assignment
+                          </button>
+                        )}
+                      </td>
+                    )}
+
                     <td>
                       {camera.enabled && selectedCamera === camera.id ? (
                         <CameraMediaPreview cameraId={camera.id} organizationId={organizationId}
@@ -126,7 +143,7 @@ export default function RealCameraTable({ sites, cameras, organizationId, token,
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center py-8">
+                  <td colSpan={isOrgAdmin ? 6 : 5} className="text-center py-8">
                     {search
                       ? "No cameras match your search."
                       : "No cameras configured for this organization."}
