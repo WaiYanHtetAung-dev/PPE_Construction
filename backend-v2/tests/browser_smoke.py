@@ -110,6 +110,20 @@ def test_same_origin_session_and_data(smoke_origin, admin_account):
         assert any(url.startswith(f'{smoke_origin}{prefix}/sites/') and url.endswith('/cameras')
                    and status == 200 for url, status in responses.items())
 
+        row = page.get_by_role('row').filter(has_text='smoke-violation')
+        incident_status = f'{smoke_origin}{prefix}/incidents/*/status'
+        page.route(incident_status, lambda route: route.fulfill(status=503))
+        row.get_by_role('button', name='Acknowledge').click()
+        expect(page.get_by_role('alert')).to_have_text(
+            'Incident update could not be confirmed. Refresh data before trying again.'
+        )
+        expect(row.get_by_text('open', exact=True)).to_be_visible()
+        page.unroute(incident_status)
+        with page.expect_response(incident_status) as updated:
+            row.get_by_role('button', name='Acknowledge').click()
+        assert updated.value.status == 200
+        expect(row.get_by_text('acknowledged', exact=True)).to_be_visible()
+
         sites_url = f'{smoke_origin}{prefix}/sites'
         page.route(sites_url, lambda route: route.fulfill(status=503, json={'detail': 'Unavailable'}))
         page.get_by_role('button', name='Refresh data').click()

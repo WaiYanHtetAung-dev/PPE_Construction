@@ -30,6 +30,8 @@ type Props = {
   incidents: IncidentPage | null;
   sites: Site[];
   cameras: Camera[];
+  updateStatus?: (id: string, status: "acknowledged" | "resolved") => void;
+  statusBusy: boolean;
 };
 
 function statusTone(
@@ -58,6 +60,8 @@ export default function RealIncidentTable({
   incidents,
   sites,
   cameras,
+  updateStatus,
+  statusBusy,
 }: Props) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -196,6 +200,17 @@ export default function RealIncidentTable({
                       >
                         {incident.status}
                       </StatusPill>
+                      {updateStatus && (incident.status === "open" || incident.status === "acknowledged") && (
+                        <button
+                          type="button"
+                          className="ml-2 rounded border px-2 py-1 disabled:opacity-50"
+                          disabled={statusBusy}
+                          onClick={() => updateStatus(incident.id,
+                            incident.status === "open" ? "acknowledged" : "resolved")}
+                        >
+                          {incident.status === "open" ? "Acknowledge" : "Resolve"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

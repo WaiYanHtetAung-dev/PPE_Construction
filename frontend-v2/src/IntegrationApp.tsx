@@ -89,12 +89,19 @@ export default function IntegrationApp() {
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [incidents, setIncidents] = useState<IncidentPage | null>(null);
   const [busy, setBusy] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [error, setError] = useState("");
   const dataRequest = useRef<AbortController | null>(null);
+  const statusRequest = useRef<AbortController | null>(null);
+  const isOrgAdmin = user?.memberships.some((membership) => (
+    membership.organization_id === organizationId && membership.role === "admin"
+  ));
 
   const clearSession = useCallback((message: string) => {
     dataRequest.current?.abort();
     dataRequest.current = null;
+    statusRequest.current?.abort();
+    statusRequest.current = null;
     setToken(null);
     setExpiresAt(null);
     setUser(null);
@@ -104,6 +111,7 @@ export default function IntegrationApp() {
     setIncidents(null);
     setPassword("");
     setBusy(false);
+    setUpdatingStatus(false);
     setError(message);
   }, []);
 
@@ -221,6 +229,47 @@ export default function IntegrationApp() {
     }
   }
 
+  async function updateIncidentStatus(id: string, status: "acknowledged" | "resolved") {
+    if (!token || !isOrgAdmin || dataRequest.current || statusRequest.current) return;
+
+    const request = new AbortController();
+    const deadline = window.setTimeout(() => request.abort(), 10000);
+    statusRequest.current = request;
+    setUpdatingStatus(true);
+    setError("");
+    try {
+      const organization = encodeURIComponent(organizationId);
+      const result = await api<Incident>(
+        `/api/v1/organizations/${organization}/incidents/${encodeURIComponent(id)}/status`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+          signal: request.signal,
+        },
+        token
+      );
+      if (statusRequest.current !== request) return;
+      setIncidents((page) => page && ({
+        ...page,
+        items: page.items.map((incident) => incident.id === result.id ? result : incident),
+      }));
+    } catch (err) {
+      if (statusRequest.current !== request) return;
+      if (err instanceof ApiError && err.status === 401) {
+        expireSession();
+        return;
+      }
+      setError("Incident update could not be confirmed. Refresh data before trying again.");
+    } finally {
+      window.clearTimeout(deadline);
+      if (statusRequest.current === request) {
+        statusRequest.current = null;
+        setUpdatingStatus(false);
+      }
+    }
+  }
+
   async function logout() {
     clearSession("");
     if (!token) return;
@@ -317,7 +366,9 @@ export default function IntegrationApp() {
             <select
               className="ml-2 rounded-lg border bg-white p-2"
               value={organizationId}
+              disabled={updatingStatus}
               onChange={(e) => {
+                if (statusRequest.current) return;
                 const id = e.target.value;
                 setOrganizationId(id);
                 setSites([]);
@@ -338,7 +389,7 @@ export default function IntegrationApp() {
           </label>
 
           <button
-            disabled={busy}
+            disabled={busy || updatingStatus}
             onClick={() => void loadData(token, organizationId)}
             className="rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
           >
@@ -371,6 +422,8 @@ export default function IntegrationApp() {
           incidents={incidents}
           sites={sites}
           cameras={cameras}
+          updateStatus={isOrgAdmin ? (id, status) => void updateIncidentStatus(id, status) : undefined}
+          statusBusy={busy || updatingStatus}
         />
       </div>
     </FigmaShell>

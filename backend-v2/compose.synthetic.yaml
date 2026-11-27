@@ -1,0 +1,106 @@
+# Disposable testing project. Use the generated environment and project name.
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: Dockerfile.runtime-candidate
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: [/tmp:size=64m,nosuid,nodev]
+  mem_limit: 512m
+  pids_limit: 128
+
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:1eff563f6c868b9b433566e9f3cf6e5c79fbd3b95bf70ec7277d376cdbfc50d7
+    environment:
+      POSTGRES_DB: ppe_lab
+      POSTGRES_USER: ppe_lab_owner
+      POSTGRES_PASSWORD: ${PPE_LAB_OWNER_PASSWORD:?Generate a fresh lab environment}
+    volumes:
+      - lab_db:/var/lib/postgresql/data
+    networks: [database]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, ppe_lab_owner, -d, ppe_lab]
+      interval: 2s
+      timeout: 2s
+      retries: 25
+
+  bootstrap:
+    <<: *backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database]
+    environment:
+      APP_ENV: synthetic-compose
+      DATABASE_URL: postgresql+psycopg://ppe_lab_owner:${PPE_LAB_OWNER_PASSWORD:?Generate a fresh lab environment}@postgres:5432/ppe_lab
+      PPE_LAB_API_PASSWORD: ${PPE_LAB_API_PASSWORD:?Generate a fresh lab environment}
+      PPE_LAB_LOGIN_PASSWORD: ${PPE_LAB_LOGIN_PASSWORD:?Generate a fresh lab environment}
+    command:
+      - python
+      - -m
+      - tests.synthetic_compose_seed
+
+  api:
+    <<: *backend
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks: [database, web]
+    environment:
+      APP_ENV: synthetic-compose
+      DATABASE_URL: postgresql+psycopg://ppe_lab_api:${PPE_LAB_API_PASSWORD:?Generate a fresh lab environment}@postgres:5432/ppe_lab
+      ENABLE_API_DOCS: 'false'
+      SESSION_TTL_HOURS: '1'
+    healthcheck:
+      test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready', timeout=2).close()"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  frontend:
+    build:
+      context: ../frontend-v2
+      dockerfile: Dockerfile.ci
+    entrypoint: [nginx, -g, "daemon off;"]
+    user: '101:101'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:size=32m,nosuid,nodev]
+    mem_limit: 128m
+    pids_limit: 64
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ./infra/synthetic/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [web]
+    ports:
+      - target: 8080
+        host_ip: 127.0.0.1
+        protocol: tcp
+    healthcheck:
+      test: [CMD, wget, -qO, /dev/null, 'http://127.0.0.1:8080/health/ready']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+networks:
+  database:
+    internal: true
+  web:
+
+volumes:
+  lab_db:

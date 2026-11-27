@@ -1,5 +1,10 @@
 # Backend V2 Local Runbook (Windows PowerShell)
 
+## Disposable Compose lab
+
+Use the [synthetic Compose lab](SYNTHETIC_COMPOSE.md) to run the same-origin
+dashboard against an isolated, migrated PostgreSQL database.
+
 ## Same-origin browser smoke (Task 1)
 
 Run from the workspace root on D: with Node 22.12+ (or Node 24), pnpm 9.15.9

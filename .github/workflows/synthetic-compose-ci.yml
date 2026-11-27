@@ -1,0 +1,66 @@
+name: Disposable Integrated Compose
+on:
+  pull_request:
+    paths: ['backend-v2/**', 'frontend-v2/**', '.github/workflows/synthetic-compose-ci.yml']
+  push:
+    branches: ['feature/**', 'fix/**', 'main']
+    paths: ['backend-v2/**', 'frontend-v2/**', '.github/workflows/synthetic-compose-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend-v2
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend-v2/requirements*.txt
+      - name: Start isolated migrated Compose project
+        run: |
+          python scripts/create_synthetic_environment.py "$RUNNER_TEMP/.env.synthetic-stack"
+          compose=(docker compose --env-file "$RUNNER_TEMP/.env.synthetic-stack" -f compose.synthetic.yaml)
+          "${compose[@]}" config --quiet
+          "${compose[@]}" up --build --wait --wait-timeout 90
+          binding="$("${compose[@]}" port frontend 8080)"
+          [[ "$binding" =~ ^127\.0\.0\.1:[0-9]+$ ]]
+          printf 'LAB_ORIGIN=http://%s\n' "$binding" >> "$GITHUB_ENV"
+      - name: Exercise real dashboard and tenant authorization
+        run: |
+          python -m pip install -r requirements-browser-smoke.txt
+          python -m playwright install --with-deps chromium
+          python -m tests.synthetic_compose_browser --origin "$LAB_ORIGIN" --env-file "$RUNNER_TEMP/.env.synthetic-stack"
+      - name: Check persisted incident audit and restricted database role
+        run: |
+          result="$(docker compose --env-file "$RUNNER_TEMP/.env.synthetic-stack" -f compose.synthetic.yaml \
+            exec -T postgres psql --no-psqlrc --no-password -U ppe_lab_owner -d ppe_lab -Atq -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT string_agg(a.action, ',' ORDER BY a.action)
+            FROM audit_logs a JOIN incidents i ON i.id = a.target_id AND i.organization_id = a.organization_id
+            WHERE a.actor_user_id = '8b351059-d530-49d9-8b85-8bac94f01c01'
+              AND a.target_type = 'incident' AND i.status = 'resolved';
+          SELECT NOT has_table_privilege('ppe_lab_api', 'incidents', 'INSERT')
+             AND NOT has_table_privilege('ppe_lab_api', 'audit_logs', 'UPDATE')
+             AND NOT has_table_privilege('ppe_lab_api', 'audit_logs', 'DELETE');
+          SQL
+          )"
+          [[ "$result" == $'incident.acknowledged,incident.resolved\nt' ]]
+          echo 'PPE_COMPOSE_DB: persisted transitions, audited actor and restricted runtime role passed'
+      - name: Remove only this run's project and disposable volume
+        if: always()
+        run: |
+          file="$RUNNER_TEMP/.env.synthetic-stack"
+          if [[ -f "$file" ]]; then
+            docker compose --env-file "$file" -f compose.synthetic.yaml ps -a
+            docker compose --env-file "$file" -f compose.synthetic.yaml down --volumes
+          fi
