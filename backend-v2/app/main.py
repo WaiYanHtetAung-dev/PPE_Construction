@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api import auth, camera_models, incidents, model_catalog, platform_models, sites
+from app.api import auth, camera_media, camera_models, incidents, model_catalog, platform_models, sites
 from app.config import get_settings
 from app.db.session import engine
 
@@ -42,3 +42,4 @@ app.include_router(incidents.router, prefix='/api/v1')
 app.include_router(platform_models.router, prefix='/api/v1')
 app.include_router(model_catalog.router, prefix='/api/v1')
 app.include_router(camera_models.router, prefix='/api/v1')
+app.include_router(camera_media.router, prefix='/api/v1')

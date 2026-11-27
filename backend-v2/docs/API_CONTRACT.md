@@ -15,6 +15,8 @@ Versioning: `/api/v1` is stable. OpenAPI schema at `/openapi.json` and Swagger a
 | POST | `/api/v1/organizations/{org_id}/sites` | admin | implemented |
 | GET | `/api/v1/organizations/{org_id}/sites/{site_id}/cameras` | member | implemented |
 | POST | `/api/v1/organizations/{org_id}/sites/{site_id}/cameras` | admin | implemented |
+| GET | `/api/v1/organizations/{org_id}/cameras/{camera_id}/media/status` | member | camera availability and preview readiness |
+| GET | `/api/v1/organizations/{org_id}/cameras/{camera_id}/media/preview` | member | current short MP4 clip if enabled and available |
 | GET | `/api/v1/organizations/{org_id}/incidents?limit=50&offset=0` | member | implemented |
 | GET | `/api/v1/organizations/{org_id}/models?limit=50&offset=0` | admin | implemented |
 | GET | `/api/v1/organizations/{org_id}/models/{model_version_id}` | admin | implemented |
@@ -52,6 +54,12 @@ Never log/store the raw bearer token; only its SHA-256 digest is persisted for s
 `stream_ref` is an **opaque, nonsecret** alias resolved inside the Media Gateway. Never submit `rtsp://user:pass@host` to this API.
 
 ## Security rules
+
+Camera media reads validate the human session, organization and camera ownership.
+The status response contains `state` and `preview_available`. An unavailable or
+disabled camera cannot serve a clip. Successful responses use `Cache-Control:
+no-store`. The browser never receives media service credentials. The optional
+same-host media read plane and its setup are documented in [ADR-006](ADR-006-OUTBOUND-MEDIA.md).
 
 ### Organization model catalog
 

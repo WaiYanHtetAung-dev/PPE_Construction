@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=list)
     session_ttl_hours: int = Field(default=12, ge=1, le=168)
     model_artifact_namespace: str = ''
+    media_gateway_origin: str = ''
+    media_gateway_token_file: str = ''
 
 
 @lru_cache

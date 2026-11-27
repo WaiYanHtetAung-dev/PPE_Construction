@@ -1,5 +1,6 @@
 
 import { useState } from "react";
+import CameraMediaPreview from "./CameraMediaPreview";
 import { Card, Icon, SectionHeader, StatusPill } from "./components/ui";
 
 type Site = {
@@ -18,10 +19,14 @@ type Camera = {
 type Props = {
   sites: Site[];
   cameras: Camera[];
+  organizationId: string;
+  token: string;
+  expireSession: () => void;
 };
 
-export default function RealCameraTable({ sites, cameras }: Props) {
+export default function RealCameraTable({ sites, cameras, organizationId, token, expireSession }: Props) {
   const [search, setSearch] = useState("");
+  const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
 
   const filtered = cameras.filter((camera) => {
     const site = sites.find((s) => s.id === camera.site_id);
@@ -104,9 +109,12 @@ export default function RealCameraTable({ sites, cameras }: Props) {
                     </td>
 
                     <td>
-                      <StatusPill tone="neutral">
-                        Not monitored
-                      </StatusPill>
+                      {camera.enabled && selectedCamera === camera.id ? (
+                        <CameraMediaPreview cameraId={camera.id} organizationId={organizationId}
+                          token={token} expireSession={expireSession} />
+                      ) : camera.enabled ? (
+                        <button type="button" onClick={() => setSelectedCamera(camera.id)}>Check camera status</button>
+                      ) : <StatusPill tone="neutral">Disabled</StatusPill>}
                     </td>
 
                     <td>
@@ -130,8 +138,7 @@ export default function RealCameraTable({ sites, cameras }: Props) {
         </div>
 
         <div className="border-t px-5 py-3 text-xs text-slate-500">
-          Configuration enabled does not mean the camera is online.
-          Live streaming and camera health monitoring are not active.
+          Camera health reflects the latest frames received by the media gateway.
         </div>
       </Card>
     </div>

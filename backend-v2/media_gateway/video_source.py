@@ -39,10 +39,35 @@ async def _frames(process: asyncio.subprocess.Process) -> AsyncIterator[DecodedF
         except asyncio.IncompleteReadError as error:
             if not error.partial and error.expected == HEADER.size and await process.wait() == 0:
                 return
-            raise OSError('Local video decoder failed or returned a truncated frame') from None
+            raise OSError('Video decoder failed or returned a truncated frame') from None
         previous = pts
         yield DecodedFrame(payload, datetime.now(UTC), pts, index, width, height)
         index += 1
+
+
+@asynccontextmanager
+async def decoder_process(argument: str, *, secret_url: str | None = None):
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, '-B', '-m', 'media_gateway._decode_video', argument,
+        stdin=asyncio.subprocess.PIPE if secret_url is not None else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    frames = _frames(process)
+    try:
+        if secret_url is not None:
+            process.stdin.write(secret_url.encode('ascii'))
+            await process.stdin.drain()
+            process.stdin.close()
+        yield frames
+    finally:
+        await frames.aclose()
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        await process.communicate()
 
 
 @asynccontextmanager
@@ -53,19 +78,5 @@ async def local_video_source(path: Path) -> AsyncIterator[AsyncIterator[DecodedF
     path = path.resolve()
     if path.as_posix().startswith('//') or path.suffix.lower() != '.mp4' or not path.is_file():
         raise OSError('Expected a local MP4 file')
-    process = await asyncio.create_subprocess_exec(
-        sys.executable, '-B', '-m', 'media_gateway._decode_video', str(path),
-        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    frames = _frames(process)
-    try:
+    async with decoder_process(str(path)) as frames:
         yield frames
-    finally:
-        await frames.aclose()
-        if process.returncode is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
-        await process.communicate()

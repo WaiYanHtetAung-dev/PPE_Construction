@@ -7,7 +7,7 @@
 | ADR-003 | Versioned JSON inference request/response | Adopted at contract level | Adapter can swap models while preserving canonical classes |
 | ADR-004 | Globally curated registry with tenant-scoped camera assignments | **Approved (2026-11-18)** | Global version identity and separate publishing and assignment permissions |
 | ADR-005 | Incident state, dedup window, idempotency and outbox | OPEN (Phase 3) | Prevent double alerts and data loss |
-| ADR-006 | Media topology VPN pull vs edge outbound push | OPEN (Phase 4) | Router-only cloud pull requires site connectivity |
+| [ADR-006](ADR-006-OUTBOUND-MEDIA.md) | Outbound site media publishing | **Proposed** | Site RTSP to encrypted central SRT; pilot approval remains open |
 | ADR-007 | Evidence retention and privacy controls | OPEN (Phase 5) | Significant storage/security/legal implications |
 | ADR-008 | Actual FPS/latency/availability SLOs | OPEN (Phase 7) | Needs representative 50–100 camera benchmark |
 | ADR-009 | Workload-scoped camera assignment snapshots | **Approved for implementation and synthetic testing** | Production workload provisioning and live connectivity require separate authorization |

@@ -37,7 +37,7 @@
 
 | Roadmap step | Available evidence | Required before release |
 |---|---|---|
-| 6 · Media gateway and CCTV | Disposable HTTPS/PostgreSQL/ONNX runs exercise assignment changes, revocation, decoder recovery and overlapping source outages. | Approve the site connector topology (ADR-006), identify pilot cameras and authorize live connectivity. |
+| 6 · Media gateway and CCTV | Disposable HTTPS/PostgreSQL/ONNX runs exercise assignment changes, revocation, decoder recovery and overlapping source outages. The ADR-006 slice adds authenticated camera reads, a bounded browser clip and a loopback RTSP/SRT acceptance job. | Approve ADR-006 and pilot scope. Verify site routing, encrypted tunnel, private process isolation, credential rotation, codec compatibility and the network-to-ADR-009 inference wiring in staging. |
 | 7 · Evidence and realtime delivery | The public incident list has a browser smoke test with synthetic data. | Approve ADR-005 for incident-to-evidence integration and ADR-007 for retention and privacy. Verify evidence delivery and notification replay. |
 | 8 · Capacity | Three- and six-camera synthetic runs measure per-camera throughput, result gaps and queue pressure. | Obtain approved representative fixtures and agree SLOs (ADR-008). Run the 50–100-stream trial and validate the approved model. |
 | 9 · Security, monitoring and backup | CI exercises synthetic credential rotation, snapshot scope, TLS and database migrations. Pipeline timing is available in the synthetic report. | Demonstrate backup and restore, agree alert thresholds and the operator response, and complete the production security review. |
@@ -47,3 +47,10 @@ Real Finalboss export and parity are tracked separately with the approved
 artifact, checkpoint rights, locked toolchain and validation corpus requirements.
 See [offline workflow acceptance](PHASE_2_6_ACCEPTANCE.md) and the
 [synthetic evidence runbook](LOCAL_RUNBOOK.md#synthetic-pilot-diagnostics-in-a-browser).
+
+Local ADR-006 checks cover cross-organization camera denial, requests after
+logout, disabled cameras, database binding, H.264 clip encoding, and unsafe
+source configuration rejection. The [outbound media workflow](../../.github/workflows/outbound-media-ci.yml)
+records reproducible protocol and browser acceptance attempts. Site router
+rules, WAN media, production credentials and representative capacity have no
+acceptance evidence from this slice.

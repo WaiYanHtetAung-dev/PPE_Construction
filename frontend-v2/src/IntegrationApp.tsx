@@ -107,6 +107,8 @@ export default function IntegrationApp() {
     setError(message);
   }, []);
 
+  const expireSession = useCallback(() => clearSession(sessionExpired), [clearSession]);
+
   useEffect(() => {
     if (expiresAt === null) return;
     const timeout = window.setTimeout(() => clearSession(sessionExpired),
@@ -311,7 +313,7 @@ export default function IntegrationApp() {
 
         <div className="my-7 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
           Real PostgreSQL data. CCTV streaming, AI detection,
-          compliance metrics and live camera health are not enabled.
+          compliance metrics remain unavailable.
         </div>
 
         <div className="mb-5 flex flex-wrap items-center gap-3">
@@ -362,8 +364,12 @@ export default function IntegrationApp() {
         />
 
         <RealCameraTable
+          key={organizationId}
           sites={sites}
           cameras={cameras}
+          organizationId={organizationId}
+          token={token}
+          expireSession={expireSession}
         />
 
         <RealIncidentTable
