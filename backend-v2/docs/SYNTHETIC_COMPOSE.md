@@ -71,6 +71,7 @@ docker compose @lab start synthetic-site
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state online
 docker compose @lab exec -T ai-control python -m tests.synthetic_compose_ai probe --record-synthetic-incident
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --expect-probe-incident
+docker compose @lab exec -T ai-control python -m tests.synthetic_compose_outbox
 ```
 
 The test registers a camera and advances the seeded incident. The
@@ -83,6 +84,10 @@ The explicit incident probe then submits a test-confirmed event through the
 existing ingestion app in-process, retries that event once and verifies one
 incident and outbox row. The browser checks that North shows one probe incident
 and South cannot see it. Use a fresh lab for this count-based acceptance run.
+The outbox probe then uses the existing HTTPS transport. Its disposable
+receiver stores one receipt, returns 503 to simulate acknowledgement failure,
+restarts and accepts the replay using the same key. PostgreSQL records two
+attempts and a successful publish acknowledgement.
 
 ## Stop and recover
 

@@ -57,6 +57,7 @@ jobs:
           "${probe[@]}" --media-state online
           "${compose[@]}" exec -T ai-control python -m tests.synthetic_compose_ai probe --record-synthetic-incident
           "${probe[@]}" --expect-probe-incident
+          "${compose[@]}" exec -T ai-control python -m tests.synthetic_compose_outbox
       - name: Check persisted incident audit and restricted database role
         run: |
           result="$(docker compose --env-file "$RUNNER_TEMP/.env.synthetic-stack" -f compose.synthetic.yaml \
@@ -68,13 +69,14 @@ jobs:
           SELECT NOT has_table_privilege('ppe_lab_api', 'incidents', 'INSERT')
              AND NOT has_table_privilege('ppe_lab_api', 'audit_logs', 'UPDATE')
              AND NOT has_table_privilege('ppe_lab_api', 'audit_logs', 'DELETE');
-          SELECT count(*) = 1 FROM incident_outbox o JOIN incidents i ON i.id = o.incident_id
+          SELECT count(*) = 1 AND bool_and(o.attempts = 2 AND o.published_at IS NOT NULL AND o.retry_at IS NULL)
+            FROM incident_outbox o JOIN incidents i ON i.id = o.incident_id
             WHERE i.violation_type = 'synthetic_onnx_probe'
               AND i.organization_id = '8b351059-d530-49d9-8b85-8bac94f01c02';
           SQL
           )"
           [[ "$result" == $'incident.acknowledged,incident.resolved\nt\nt' ]]
-          echo 'PPE_COMPOSE_DB: status audit, restricted runtime role and one probe outbox row passed'
+          echo 'PPE_COMPOSE_DB: status audit, restricted runtime role and one acknowledged outbox event passed'
       - name: Remove only this run's project and disposable volume
         if: always()
         run: |

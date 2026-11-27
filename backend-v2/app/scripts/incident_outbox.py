@@ -55,6 +55,16 @@ def deliver_one(db: Session, publish: Callable[[IncidentCreated], bool]) -> Deli
         return DeliveryResult.RETRY_SCHEDULED
 
 
+def post_event(client: httpx.Client, endpoint: httpx.URL, token: str, event: IncidentCreated) -> bool:
+    try:
+        with client.stream('POST', endpoint, json=asdict(event), headers={
+            'Authorization': f'Bearer {token}', 'Idempotency-Key': event.event_id,
+        }) as response:
+            return response.is_success
+    except httpx.RequestError:
+        return False
+
+
 def main() -> None:
     endpoint = httpx.URL(os.environ['INCIDENT_PUBLISH_URL'])
     if endpoint.scheme != 'https' or not endpoint.host or endpoint.userinfo or endpoint.query or endpoint.fragment:
@@ -68,16 +78,7 @@ def main() -> None:
         if db.get_bind().dialect.name != 'postgresql':
             raise SystemExit('Incident outbox delivery requires PostgreSQL')
 
-        def publish(event: IncidentCreated) -> bool:
-            try:
-                with client.stream('POST', endpoint, json=asdict(event), headers={
-                    'Authorization': f'Bearer {token}', 'Idempotency-Key': event.event_id,
-                }) as response:
-                    return response.is_success
-            except httpx.RequestError:
-                return False
-
-        print(deliver_one(db, publish).value)
+        print(deliver_one(db, lambda event: post_event(client, endpoint, token, event)).value)
 
 
 if __name__ == '__main__':

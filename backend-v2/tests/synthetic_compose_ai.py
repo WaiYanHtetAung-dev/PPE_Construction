@@ -50,6 +50,10 @@ def readers(engine, owner):
             'SELECT ON cameras, sites, incidents, incident_outbox',
             'INSERT ON incidents, incident_outbox',
         ],
+        'outbox_fixture': [
+            'SELECT ON incidents, incident_outbox',
+            'UPDATE (attempts, published_at, retry_at) ON incident_outbox',
+        ],
     }
     with engine.begin() as db:
         for role in ('ppe_model_verifier', 'ppe_assignment_operator'):
@@ -181,27 +185,33 @@ async def control():
         await stop.wait()
 
 
+def fixture_engine(role):
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine import make_url
+
+    if os.environ.get('APP_ENV') != 'synthetic-compose' or role not in {'incident_fixture', 'outbox_fixture'}:
+        raise ValueError('Invalid lab fixture database role')
+    url = make_url((CONTROL / f'{role}.url').read_text(encoding='ascii'))
+    if (url.query or (url.drivername, url.username, url.host, url.port, url.database) !=
+            ('postgresql+psycopg', f'ppe_lab_{role}', 'postgres', 5432, 'ppe_lab')):
+        raise ValueError('Probe requires the isolated lab database role')
+    return create_engine(url, hide_parameters=True, connect_args={
+        'connect_timeout': 2, 'options': '-c statement_timeout=2000',
+    })
+
+
 async def record_probe_incident(row):
     """Exercise existing ingestion with an explicitly confirmed test event."""
     from secrets import token_urlsafe
 
     import httpx
-    from sqlalchemy import create_engine
-    from sqlalchemy.engine import make_url
     from sqlalchemy.orm import Session
 
     from app.db.models import IncidentOutbox
     from app.db.session import get_db
     from app.incident_ingestion import create_ingestion
 
-    url = make_url((CONTROL / 'incident_fixture.url').read_text(encoding='ascii'))
-    if (os.environ.get('APP_ENV') != 'synthetic-compose' or url.query
-            or (url.drivername, url.username, url.host, url.port, url.database) !=
-            ('postgresql+psycopg', 'ppe_lab_incident_fixture', 'postgres', 5432, 'ppe_lab')):
-        raise ValueError('Incident probe requires the isolated lab database role')
-    engine = create_engine(url, hide_parameters=True, connect_args={
-        'connect_timeout': 2, 'options': '-c statement_timeout=2000',
-    })
+    engine = fixture_engine('incident_fixture')
     secret = token_urlsafe(32)
     ingest = create_ingestion(secret)
 
