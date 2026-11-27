@@ -1,0 +1,35 @@
+# Optional HTTPS LAN entry point for the disposable synthetic Compose lab.
+# Use with compose.synthetic.yaml + compose.synthetic.media.yaml + compose.synthetic.ai.yaml.
+# PPE_LAB_LAN_IP must be an IPv4 address assigned to the Windows Docker host.
+services:
+  lan-https:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=16m,nosuid,nodev
+    mem_limit: 128m
+    pids_limit: 64
+    depends_on:
+      frontend:
+        condition: service_healthy
+    environment:
+      PPE_LAB_LAN_IP: ${PPE_LAB_LAN_IP:?Set PPE_LAB_LAN_IP to the Docker host LAN IPv4 address}
+    ports:
+      - "${PPE_LAB_LAN_IP:?Set LAN IPv4 address}:8443:8443/tcp"
+    networks: [web]
+    volumes:
+      - type: bind
+        source: ./infra/synthetic/Caddyfile.lan-https
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - lan_caddy_data:/data
+      - lan_caddy_config:/config
+
+volumes:
+  lan_caddy_data:
+  lan_caddy_config:
