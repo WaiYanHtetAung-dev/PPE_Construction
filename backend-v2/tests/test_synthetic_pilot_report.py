@@ -26,7 +26,10 @@ def measurements():
         'peak_pending': 2, 'peak_pending_bytes': 6144, 'queue_replacements': 1}],
                  'cameras': [{'camera': 1, 'offered': 11, 'emitted': 8, 'replaced': 2, 'rejected': 0, 'purged': 0,
                               'pending_at_shutdown': 1, 'in_flight_at_shutdown': 0}]}
-    capacity = [{'peak_pending': 2, 'peak_pending_bytes': 6144, 'cameras': [
+    capacity = [{'peak_pending': 2, 'peak_pending_bytes': 6144,
+                 'phase_median_ms': {'decode_first': 25, 'decode_next': 1, 'queue': 120, 'stage': 4,
+                                     'worker_total': 240, 'eligibility': 6, 'model_load': 9, 'adapter_infer': 180},
+                 'cameras': [
         {'emitted': 12, 'emitted_fps': 1, 'max_result_gap_ms': 1100, 'queue_replacements': 4},
         {'emitted': 18, 'emitted_fps': 1.5, 'max_result_gap_ms': 800, 'queue_replacements': 2},
     ]}]
@@ -43,6 +46,7 @@ def test_report_labels_fixtures_and_summarizes_measured_windows(measurements):
     assert '<td>2<br>4</td>' in page and '<td>1.100<br>1.200</td>' in page
     assert '<td>9</td><td>2.25</td>' in page and '<td>2 <small>6.0 KiB</small></td>' in page
     assert '<td>30</td><td>1.00</td><td>1.100</td><td>6</td>' in page
+    assert '<td>240.00</td><td>6.00</td><td>9.00</td><td>180.00</td>' in page
     assert 'default-src \'none\'' in page
     assert '<script' not in page and 'private-fixture-identifier' not in page
 

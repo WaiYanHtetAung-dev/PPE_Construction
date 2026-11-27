@@ -10,7 +10,7 @@
 | ADR-006 | Media topology VPN pull vs edge outbound push | OPEN (Phase 4) | Router-only cloud pull requires site connectivity |
 | ADR-007 | Evidence retention and privacy controls | OPEN (Phase 5) | Significant storage/security/legal implications |
 | ADR-008 | Actual FPS/latency/availability SLOs | OPEN (Phase 7) | Needs representative 50–100 camera benchmark |
-| ADR-009 | Workload-scoped camera assignment snapshots | **PENDING APPROVAL** | Define camera authorization, assignment freshness, and revocation ordering before gateway sync |
+| ADR-009 | Workload-scoped camera assignment snapshots | **Approved for implementation and synthetic testing** | Production workload provisioning and live connectivity require separate authorization |
 
 ## ADR-004 — Globally curated model registry
 

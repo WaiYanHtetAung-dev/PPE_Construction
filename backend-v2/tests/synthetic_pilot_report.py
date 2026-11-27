@@ -46,6 +46,9 @@ def render_report(trials, summary, restart, reconnect, capacity):
         for row in reconnect['cameras']
     )
     capacity_rows = []
+    timing_rows = []
+    phase_order = ('decode_first', 'decode_next', 'queue', 'stage', 'worker_total',
+                   'eligibility', 'model_load', 'adapter_infer')
     for run, window in enumerate(capacity, 1):
         cameras = window['cameras']
         results = sum(camera['emitted'] for camera in cameras)
@@ -55,6 +58,9 @@ def render_report(trials, summary, restart, reconnect, capacity):
         capacity_rows.append(f'''<tr><th scope="row">{run:d}</th><td>{len(cameras):d}</td>
           <td>{results:d}</td><td>{slowest:.2f}</td><td>{gap:.3f}</td><td>{replacements:d}</td>
           <td>{window['peak_pending']:d} <small>{window['peak_pending_bytes'] / 1024:.1f} KiB</small></td></tr>''')
+        timings = window['phase_median_ms']
+        cells = ''.join(f'<td>{timings[phase]:.2f}</td>' for phase in phase_order)
+        timing_rows.append(f'<tr><th scope="row">{run:d}</th><td>{len(cameras):d}</td>{cells}</tr>')
 
     return f'''<!doctype html>
 <html lang="en">
@@ -159,6 +165,19 @@ def render_report(trials, summary, restart, reconnect, capacity):
     </div>
     <p class="note">Four steady windows at {interval:.1f} s sampling. Result gaps include the edges of each
       window. Queue peaks count pending frame payloads.</p>
+    <h3 id="timing-heading">Pipeline timing (median ms)</h3>
+    <div class="table-wrap" role="region" aria-labelledby="timing-heading" tabindex="0">
+      <table aria-labelledby="timing-heading">
+        <thead><tr><th scope="col">Window</th><th scope="col">Cameras</th><th scope="col">First frame</th>
+          <th scope="col">Next frame</th><th scope="col">Queue wait</th><th scope="col">Gateway staging</th>
+          <th scope="col">Worker total</th><th scope="col">Eligibility</th>
+          <th scope="col">Model load</th><th scope="col">Adapter inference</th></tr></thead>
+        <tbody>{''.join(timing_rows)}</tbody>
+      </table>
+    </div>
+    <p class="note">First frame includes decoder startup. Read waits exclude replay pacing.
+      Worker total includes eligibility, verification, model load and inference. Each column is
+      summarized independently.</p>
   </section>
 </main>
 </body>

@@ -22,7 +22,7 @@ from media_gateway.video_source import local_video_source
 
 
 @asynccontextmanager
-async def paced_video(path, fps, observe):
+async def paced_video(path, fps, observe, observe_read=None):
     """Loop a generated clip with continuous PTS and no catch-up bursts."""
     clock = asyncio.get_running_loop().time
 
@@ -30,8 +30,11 @@ async def paced_video(path, fps, observe):
         offset, index, previous_pts, released = 0.0, 0, None, None
         while True:
             count = 0
+            read_started = clock()
             async with local_video_source(path) as decoded:
                 async for frame in decoded:
+                    if observe_read is not None:
+                        observe_read(clock() - read_started, count == 0)
                     pts = offset + frame.source_timestamp
                     if previous_pts is not None:
                         gap = pts - previous_pts
@@ -44,6 +47,7 @@ async def paced_video(path, fps, observe):
                     previous_pts, released = pts, now
                     index += 1
                     count += 1
+                    read_started = clock()
             if count != fps:
                 raise ValueError('Unexpected frame count in one-second fixture')
             offset += 1.0
@@ -162,7 +166,7 @@ import uvicorn
 fd, cert, key = sys.argv[1:]
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM, fileno=int(fd)) as listener:
     config = uvicorn.Config(
-        'inference_worker.service:from_environment', factory=True,
+        'tests.synthetic_worker_profile:worker_factory', factory=True,
         ssl_certfile=cert, ssl_keyfile=key, access_log=False,
         proxy_headers=False, log_level='warning',
     )

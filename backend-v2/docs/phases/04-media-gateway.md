@@ -277,6 +277,16 @@ edges, queue peaks and replacements. Per-camera rates and sample ages are in
 the CI log. These short loopback CPU runs establish a synthetic comparison;
 50–100 camera capacity and site-to-site performance need separate evidence.
 
+The same four capacity windows report median pipeline timings. Decoder read
+wait is measured at the child process pipe before replay pacing; first-frame
+wait includes subprocess startup. Queue wait runs from sampling to dequeue.
+Gateway staging runs from dequeue to the HTTPS request. Worker total comes
+from inference v1 and includes eligibility checks, artifact verification, frame
+reads, model load and inference. A test-only worker wrapper separately times
+eligibility lookups, model load and the ONNX adapter call. Adapter timing
+includes preprocessing and postprocessing. The worker subphases are included
+in the worker total. Independent medians need not sum to the median total.
+
 ## Design decisions and prerequisites
 
 Decide cloud-pull WireGuard vs site outbound relay, actual codecs/bitrates, validation cameras, track bounded GPU workload.

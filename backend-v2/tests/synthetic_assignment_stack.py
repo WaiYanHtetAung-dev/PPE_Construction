@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
@@ -44,6 +44,7 @@ from tests.media_decoder_integration import HEIGHT, WIDTH, generate_clip
 from tests.synthetic_pilot_report import render_report
 from tests.synthetic_reconnect_soak import run_reconnect_soak
 from tests.synthetic_stack_support import listener, paced_video, readonly_bind, temporary_tls, wait_for, worker_process
+from tests.synthetic_worker_profile import ProfiledTransport
 from tests.test_onnx_cpu import fixture_graph
 from tests.test_model_verification import role_connections
 
@@ -221,6 +222,7 @@ class MeasuredQueue(FrameQueue):
         frame = super().take()
         if frame is not None:
             self.taken[frame.camera_id] += 1
+            self.last_taken_at = asyncio.get_running_loop().time()
         return frame
 
 
@@ -285,7 +287,7 @@ async def exercise_stack(root):
             authority_url = await stack.enter_async_context(listener(authority_app, cert, key))
             settings = {'ELIGIBILITY_AUTHORITY_URL': authority_url, 'ELIGIBILITY_AUTHORITY_CA_FILE': str(ca_file),
                         'INFERENCE_RUNTIME_FACTORY':
-                        'inference_worker.onnx_cpu:factory', 'MODEL_ARTIFACT_NAMESPACE': 'synthetic',
+                        'tests.synthetic_worker_profile:ProfiledRuntime', 'MODEL_ARTIFACT_NAMESPACE': 'synthetic',
                         'INFERENCE_FRAME_NAMESPACE': 'frames', 'INFERENCE_MAX_MODEL_BYTES': str(1024**2),
                         'INFERENCE_MAX_FRAME_BYTES': str(1024**2), 'INFERENCE_MODEL_ROOT': str(model_mount),
                         'INFERENCE_FRAME_ROOT': str(frame_mount)}
@@ -555,6 +557,7 @@ async def compare_camera_counts(scopes, pilot_paths, context, control_url, token
     for block, order in enumerate((counts, counts[::-1]), 1):
         for count in order:
             queue = MeasuredQueue(count)
+            profile = ProfiledTransport(context)
             paths = {str(scope.camera_id): path
                      for scope, path in zip(scopes[:count], fixture_paths[:count], strict=True)}
             async with (
@@ -563,10 +566,10 @@ async def compare_camera_counts(scopes, pilot_paths, context, control_url, token
                                    supported_class_maps=[CLASS_MAP],
                                    transport=httpx.AsyncHTTPTransport(verify=context, trust_env=False)) as resolver,
                 InferenceDispatcher(queue, resolver, frames, worker_origin=worker_url, token=worker_secret,
-                                    transport=httpx.AsyncHTTPTransport(verify=context, trust_env=False)) as dispatcher,
+                                    transport=profile) as dispatcher,
             ):
                 window = await compare_sampling_interval(resolver, dispatcher, queue, paths, 0.3,
-                                                         input_rates=fixture_rates[:count])
+                                                         input_rates=fixture_rates[:count], profile=profile)
             windows.append(dict(window, block=block))
     return windows
 
@@ -703,7 +706,8 @@ def summarize_sampling_trials(trials):
     }
 
 
-async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval, *, input_rates=FIXTURE_RATES):
+async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval, *,
+                                    input_rates=FIXTURE_RATES, profile=None):
     """Use the same eligible bindings and paced sources without artificial holds."""
     cameras = tuple(paths)
     # Bootstrap within the listener's concurrency limit before staggered polling.
@@ -713,6 +717,7 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
     last_result = {}
     largest_gap = {}
     source_frames = Counter()
+    phase_samples = defaultdict(list)
     warmed = set()
     measuring = False
     clock = asyncio.get_running_loop().time
@@ -723,6 +728,10 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
                 source_frames[camera] += 1
 
         return record
+
+    def record_read(seconds, first):
+        if measuring:
+            phase_samples['decode_first' if first else 'decode_next'].append(seconds * 1000)
 
     async def consume():
         while True:
@@ -744,13 +753,25 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
                     age_by_camera[camera].append(age)
                     largest_gap[camera] = max(largest_gap.get(camera, 0), completed - last_result[camera])
                     last_result[camera] = completed
+                    if profile is not None:
+                        assert profile.phases is not None
+                        assert row.frame.sampled_monotonic <= queue.last_taken_at <= profile.starts_at <= completed
+                        queue_ms = (queue.last_taken_at - row.frame.sampled_monotonic) * 1000
+                        stage_ms = (profile.starts_at - queue.last_taken_at) * 1000
+                        worker_ms = row.response.inference_ms
+                        assert sum(profile.phases.values()) <= worker_ms + 0.002
+                        for phase, value in (profile.phases | {
+                            'queue': queue_ms, 'stage': stage_ms, 'worker_total': worker_ms,
+                        }).items():
+                            phase_samples[phase].append(value)
             await asyncio.sleep(0.02)
 
     tasks = [asyncio.create_task(resolver.run()), asyncio.create_task(consume())]
+    reader = record_read if profile is not None else None
     for (camera, path), fps in zip(paths.items(), input_rates, strict=True):
         record = observe(camera)
         tasks.append(asyncio.create_task(sample_camera(
-            camera, lambda path=path, fps=fps, record=record: paced_video(path, fps, record), queue,
+            camera, lambda path=path, fps=fps, record=record: paced_video(path, fps, record, reader), queue,
             sample_interval=interval, frame_timeout=4, retry_initial=0.7, retry_max=1.4,
         )))
     try:
@@ -778,7 +799,7 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
         while queue.take() is not None:
             pass
 
-    return {
+    window = {
         'sample_interval_s': interval,
         'measurement_s': round(elapsed, 3),
         'peak_pending': peak_pending,
@@ -799,6 +820,10 @@ async def compare_sampling_interval(resolver, dispatcher, queue, paths, interval
             'queue_purges': losses[camera, 'purge_other'],
         } for camera, fps in zip(cameras, input_rates, strict=True)],
     }
+    if profile is not None:
+        assert phase_samples['decode_first'] and phase_samples['decode_next']
+        window['phase_median_ms'] = {phase: round(median(values), 2) for phase, values in phase_samples.items()}
+    return window
 
 
 async def run_repeated_cycles(resolver, dispatcher, queue, paths, control, worker,

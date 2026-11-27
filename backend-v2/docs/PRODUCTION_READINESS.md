@@ -32,3 +32,18 @@
 - [ ] Audit evidence, test result links and deployment approval recorded in PR/release notes.
 
 **Release decision:** Pending; production sign-off must be explicit and recorded. Do not treat successful `pytest` as release authorization.
+
+## Evidence and dependencies for roadmap steps 6–10
+
+| Roadmap step | Available evidence | Required before release |
+|---|---|---|
+| 6 · Media gateway and CCTV | Disposable HTTPS/PostgreSQL/ONNX runs exercise assignment changes, revocation, decoder recovery and overlapping source outages. | Approve the site connector topology (ADR-006), identify pilot cameras and authorize live connectivity. |
+| 7 · Evidence and realtime delivery | The public incident list has a browser smoke test with synthetic data. | Approve ADR-005 for incident-to-evidence integration and ADR-007 for retention and privacy. Verify evidence delivery and notification replay. |
+| 8 · Capacity | Three- and six-camera synthetic runs measure per-camera throughput, result gaps and queue pressure. | Obtain approved representative fixtures and agree SLOs (ADR-008). Run the 50–100-stream trial and validate the approved model. |
+| 9 · Security, monitoring and backup | CI exercises synthetic credential rotation, snapshot scope, TLS and database migrations. Pipeline timing is available in the synthetic report. | Demonstrate backup and restore, agree alert thresholds and the operator response, and complete the production security review. |
+| 10 · Staging, UAT and release | Local browser smoke and disposable CI are reproducible from the runbook. | Record staging and UAT authorization, run the acceptance and rollback rehearsals, then obtain explicit production approval. |
+
+Real Finalboss export and parity are tracked separately with the approved
+artifact, checkpoint rights, locked toolchain and validation corpus requirements.
+See [offline workflow acceptance](PHASE_2_6_ACCEPTANCE.md) and the
+[synthetic evidence runbook](LOCAL_RUNBOOK.md#synthetic-pilot-diagnostics-in-a-browser).
