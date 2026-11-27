@@ -103,8 +103,7 @@ def verify_media(browser, origin, password, state):
     organization = page.get_by_role('combobox', name='Organization')
     expect(organization).to_be_visible()
     organization.select_option(NORTH)
-    status_button = page.get_by_role('button', name='Check camera status')
-    row = page.get_by_role('row').filter(has_text='North Synthetic Camera').filter(has=status_button)
+    row = page.locator('#cameras').get_by_role('row').filter(has_text='North Synthetic Camera')
     row.get_by_role('button', name='Check camera status').click()
     north = f'{origin}/api/v1/organizations/{NORTH}/cameras/{NORTH_CAMERA}/media'
     south = f'{origin}/api/v1/organizations/{SOUTH}/cameras/{NORTH_CAMERA}/media'
@@ -112,7 +111,13 @@ def verify_media(browser, origin, password, state):
     assert page.request.get(north + '/preview').status == 401
     assert page.request.get(south + '/status', headers=headers).status == 404
     assert page.request.get(south + '/preview', headers=headers).status == 404
-    expect(row.get_by_text(state.title(), exact=True)).to_be_visible(timeout=25000)
+    try:
+        expect(row.get_by_text(state.title(), exact=True)).to_be_visible(timeout=25000)
+    except AssertionError:
+        status = page.request.get(north + '/status', headers=headers)
+        actual = status.json().get('state') if status.ok else 'unavailable'
+        print(f'Synthetic camera API status HTTP {status.status}, state={actual}')
+        raise
     if state == 'offline':
         expect(row.get_by_role('button', name='Load video preview')).to_have_count(0)
         assert page.request.get(north + '/preview', headers=headers).status == 503
