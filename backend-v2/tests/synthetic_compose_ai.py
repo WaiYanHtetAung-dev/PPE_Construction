@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 from traceback import extract_tb
 from uuid import UUID, uuid4
 
-from tests.synthetic_compose_ids import NORTH, NORTH_ALIAS, NORTH_CAMERA
+from tests.synthetic_compose_ids import NORTH, NORTH_ALIAS, NORTH_CAMERA, PROBE_VIOLATION, SOUTH
 from tests.synthetic_compose_media import HOST, LOCAL_READER, PATH, credential
 
 CONTROL = Path('/lab/control')
@@ -45,6 +45,10 @@ def readers(engine, owner):
         'verifier': [
             'SELECT ON model_versions',
             'EXECUTE ON FUNCTION public.promote_verified_model(text,text,text,text,text,timestamptz,timestamptz)',
+        ],
+        'incident_fixture': [
+            'SELECT ON cameras, sites, incidents, incident_outbox',
+            'INSERT ON incidents, incident_outbox',
         ],
     }
     with engine.begin() as db:
@@ -177,7 +181,62 @@ async def control():
         await stop.wait()
 
 
-async def probe():
+async def record_probe_incident(row):
+    """Exercise existing ingestion with an explicitly confirmed test event."""
+    from secrets import token_urlsafe
+
+    import httpx
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.orm import Session
+
+    from app.db.models import IncidentOutbox
+    from app.db.session import get_db
+    from app.incident_ingestion import create_ingestion
+
+    url = make_url((CONTROL / 'incident_fixture.url').read_text(encoding='ascii'))
+    if (os.environ.get('APP_ENV') != 'synthetic-compose' or url.query
+            or (url.drivername, url.username, url.host, url.port, url.database) !=
+            ('postgresql+psycopg', 'ppe_lab_incident_fixture', 'postgres', 5432, 'ppe_lab')):
+        raise ValueError('Incident probe requires the isolated lab database role')
+    engine = create_engine(url, hide_parameters=True, connect_args={
+        'connect_timeout': 2, 'options': '-c statement_timeout=2000',
+    })
+    secret = token_urlsafe(32)
+    ingest = create_ingestion(secret)
+
+    def lab_session():
+        with Session(engine) as db:
+            yield db
+
+    ingest.dependency_overrides[get_db] = lab_session
+    event_id = str(uuid4())
+    event = {'event_id': event_id, 'organization_id': str(row.assignment.organization_id),
+             'site_id': str(row.assignment.site_id), 'camera_id': row.frame.camera_id,
+             'detected_at': row.frame.received_at.isoformat(), 'violation_type': PROBE_VIOLATION}
+    path = '/internal/v1/incidents'
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingest),
+                                     base_url='http://synthetic-ingest') as client:
+            assert (await client.post(path, json=event)).status_code == 401
+            headers = {'Authorization': 'Bearer ' + secret}
+            assert (await client.post(path, json=event | {'organization_id': SOUTH},
+                                      headers=headers)).status_code == 404
+            created = await client.post(path, json=event, headers=headers)
+            repeated = await client.post(path, json=event, headers=headers)
+            assert created.status_code == 201 and repeated.status_code == 200
+            assert created.json()['incident_id'] == repeated.json()['incident_id']
+            assert (await client.post(path, json=event | {'violation_type': 'synthetic_conflict'},
+                                      headers=headers)).status_code == 409
+        with Session(engine) as db:
+            outbox = db.get(IncidentOutbox, event_id)
+            assert outbox and outbox.incident_id == created.json()['incident_id']
+    finally:
+        engine.dispose()
+    print('PPE_COMPOSE_INCIDENT: controlled synthetic event and retry map to one incident and outbox row')
+
+
+async def probe(*, emit_incident=False):
     import httpx
 
     from inference_worker.contract import INFERENCE_PATH
@@ -230,6 +289,8 @@ async def probe():
             for task in (poll, sampling):
                 task.cancel()
             await asyncio.gather(poll, sampling, return_exceptions=True)
+    if emit_incident:
+        await record_probe_incident(row)
 
 
 def check(*ports):
@@ -240,14 +301,20 @@ def check(*ports):
 
 def main():
     actions = {'seed': seed, 'bind': bind, 'control': lambda: asyncio.run(control()),
-               'probe': lambda: asyncio.run(probe()), 'check-worker': lambda: check(WORKER_PORT),
+               'check-worker': lambda: check(WORKER_PORT),
                'check-control': lambda: check(ASSIGNMENT_PORT, ELIGIBILITY_PORT)}
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=actions)
+    parser.add_argument('action', choices=[*actions, 'probe'])
+    parser.add_argument('--record-synthetic-incident', action='store_true')
     args = parser.parse_args()
+    if args.record_synthetic_incident and args.action != 'probe':
+        parser.error('--record-synthetic-incident requires probe')
     os.umask(0o077)
     try:
-        actions[args.action]()
+        if args.action == 'probe':
+            asyncio.run(probe(emit_incident=args.record_synthetic_incident))
+        else:
+            actions[args.action]()
     except Exception as error:
         if args.action == 'probe':
             raise

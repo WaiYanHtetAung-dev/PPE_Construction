@@ -6,7 +6,7 @@ from re import fullmatch
 
 from playwright.sync_api import expect, sync_playwright
 
-from tests.synthetic_compose_ids import EMAIL, NORTH, NORTH_CAMERA, SOUTH, UNASSIGNED
+from tests.synthetic_compose_ids import EMAIL, NORTH, NORTH_CAMERA, PROBE_VIOLATION, SOUTH, UNASSIGNED
 
 ME = '/api/v1/auth/me'
 
@@ -95,7 +95,7 @@ def verify_dashboard(browser, origin, password):
     expect(organization).to_have_count(0)
 
 
-def verify_media(browser, origin, password, state):
+def open_north_dashboard(browser, origin, password):
     page = browser.new_page(service_workers='block')
     page.route('**/*', lambda route: route.continue_() if route.request.url.startswith(origin + '/') else route.abort())
     assert page.goto(origin).ok
@@ -103,6 +103,11 @@ def verify_media(browser, origin, password, state):
     organization = page.get_by_role('combobox', name='Organization')
     expect(organization).to_be_visible()
     organization.select_option(NORTH)
+    return page, session, organization
+
+
+def verify_media(browser, origin, password, state):
+    page, session, _ = open_north_dashboard(browser, origin, password)
     row = page.locator('#cameras').get_by_role('row').filter(has_text='North Synthetic Camera')
     row.get_by_role('button', name='Check camera status').click()
     north = f'{origin}/api/v1/organizations/{NORTH}/cameras/{NORTH_CAMERA}/media'
@@ -131,11 +136,30 @@ def verify_media(browser, origin, password, state):
     expect(page.locator('video')).to_have_count(0)
 
 
+def verify_probe_incident(browser, origin, password):
+    page, session, organization = open_north_dashboard(browser, origin, password)
+    headers = {'Authorization': 'Bearer ' + session['access_token']}
+    incidents = f'{origin}/api/v1/organizations/{NORTH}/incidents'
+    response = page.request.get(incidents, headers=headers)
+    assert response.ok
+    events = [item for item in response.json()['items'] if item['violation_type'] == PROBE_VIOLATION]
+    assert len(events) == 1 and events[0]['camera_id'] == NORTH_CAMERA and events[0]['status'] == 'open'
+    fixture = page.get_by_text(PROBE_VIOLATION.replace('_', ' '), exact=True)
+    expect(fixture).to_be_visible()
+    expect(fixture).to_have_count(1)
+    organization.select_option(SOUTH)
+    expect(page.get_by_text('South Synthetic Camera', exact=True).first).to_be_visible()
+    expect(fixture).to_have_count(0)
+    print('PPE_COMPOSE_INCIDENT_BROWSER: exactly one probe incident in the authorized organization')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--origin', required=True)
     parser.add_argument('--env-file', required=True, type=Path)
-    parser.add_argument('--media-state', choices=('online', 'offline'))
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--media-state', choices=('online', 'offline'))
+    mode.add_argument('--expect-probe-incident', action='store_true')
     args = parser.parse_args()
     if not fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}', args.origin):
         parser.error('Use the published loopback origin of the disposable Compose project')
@@ -146,14 +170,14 @@ def main():
             password = settings['PPE_LAB_LOGIN_PASSWORD']
             if args.media_state:
                 verify_media(browser, args.origin, password, args.media_state)
+                print(f'PPE_COMPOSE_MEDIA: authorized gateway status {args.media_state} passed')
+            elif args.expect_probe_incident:
+                verify_probe_incident(browser, args.origin, password)
             else:
                 verify_dashboard(browser, args.origin, password)
+                print('PPE_COMPOSE_BROWSER: login, tenant isolation, status persistence, logout and expiry passed')
         finally:
             browser.close()
-    if args.media_state:
-        print(f'PPE_COMPOSE_MEDIA: authorized gateway status {args.media_state} passed')
-    else:
-        print('PPE_COMPOSE_BROWSER: login, tenant isolation, status persistence, logout and expiry passed')
 
 
 if __name__ == '__main__':

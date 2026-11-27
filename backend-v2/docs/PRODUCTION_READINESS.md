@@ -57,3 +57,12 @@ denial, and reconnection. The [outbound media workflow](../../.github/workflows/
 runs the same acceptance test on Linux. Site router
 rules, WAN media, production credentials and representative capacity have no
 acceptance evidence from this slice.
+
+The [disposable Compose run for `692fe00`](https://github.com/WaiYanHtetAung-dev/PPE_Construction/actions/runs/45965492216)
+verified migrations, same-origin login and logout, tenant isolation, incident
+status and audit persistence, authorized playback, and publisher disconnect
+and recovery. The independent worker returned ten synthetic detections both
+before the publisher stopped and after it recovered. The site network could
+not reach the central RTSP reader. See the [lab runbook](SYNTHETIC_COMPOSE.md)
+for the isolated incident replay test. Automatic incident rules, event
+delivery, evidence policy and the production release gates remain open.

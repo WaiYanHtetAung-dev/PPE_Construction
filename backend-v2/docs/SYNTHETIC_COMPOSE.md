@@ -62,7 +62,8 @@ docker compose @lab stop --timeout 10 synthetic-site
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state offline
 docker compose @lab start synthetic-site
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state online
-docker compose @lab exec -T ai-control python -m tests.synthetic_compose_ai probe
+docker compose @lab exec -T ai-control python -m tests.synthetic_compose_ai probe --record-synthetic-incident
+python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --expect-probe-incident
 ```
 
 The test registers a camera and advances the seeded incident. The
@@ -71,6 +72,10 @@ fresh stack for each run. It also verifies the two audit records in PostgreSQL
 and checks that the API role cannot insert incidents or alter audit entries.
 The ONNX probe checks worker authentication and verifies that the network frame's
 detections, camera, organization, site and model match the scoped assignment.
+The explicit incident probe then submits a test-confirmed event through the
+existing ingestion app in-process, retries that event once and verifies one
+incident and outbox row. The browser checks that North shows one probe incident
+and South cannot see it. Use a fresh lab for this count-based acceptance run.
 
 ## Stop and recover
 
@@ -92,6 +97,7 @@ The test CA, certificate and model verification are valid for one hour. Run
 database. The independent revocation and worker restart suite can be run using
 the [outbound media runbook](ADR-006-OUTBOUND-MEDIA.md#reproduce-the-synthetic-stack).
 
-The published UI uses the real incident read and status routes against seeded
-fixtures. The inference probe stops at structured detections. Detection
-ingestion policy, evidence access and notifications require ADR-005 and ADR-007.
+The published UI uses the real incident read and status routes. The probe
+exercises delivery idempotency for a single event in the disposable lab.
+Automatic detection-to-incident rules, deduplication windows, outbox publishing,
+evidence access and notifications require ADR-005 and ADR-007.

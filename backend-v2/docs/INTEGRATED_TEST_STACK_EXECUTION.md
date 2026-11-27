@@ -6,9 +6,11 @@ Baseline: 7fab0e2 (feature/frontend-v2-integration). Do not reset local changes.
 
 Use the [disposable Compose lab](SYNTHETIC_COMPOSE.md) for the integrated
 browser, PostgreSQL, outbound media and independent synthetic ONNX path.
-The lab covers the existing incident read and status API with seeded fixtures.
-Detection-to-incident policy and authorized evidence remain under ADR-005 and
-ADR-007. The linked GitHub workflow records execution evidence for each commit.
+The lab covers the existing incident read and status API and, when explicitly
+requested by the test, replays one synthetic confirmed event through the
+existing ingestion contract. Automatic rules, publication and authorized
+evidence remain under ADR-005 and ADR-007. The linked GitHub workflow records
+execution evidence for each commit.
 
 ## Required result
 

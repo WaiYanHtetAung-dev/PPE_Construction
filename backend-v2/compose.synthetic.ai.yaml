@@ -59,6 +59,7 @@ services:
       - ai_control:/lab/control:ro
       - ai_frames:/lab/frames
     environment:
+      APP_ENV: synthetic-compose
       ASSIGNMENT_DATABASE_URL_FILE: /lab/control/assignment.url
       ELIGIBILITY_DATABASE_URL_FILE: /lab/control/eligibility.url
       ELIGIBILITY_TOKEN_FILE: /lab/control/eligibility.token
