@@ -1,0 +1,14 @@
+{
+    admin off
+    auto_https disable_redirects
+    skip_install_trust
+}
+
+https://{$PPE_LAB_LAN_IP}:8443 {
+    tls internal
+
+    @internal path /internal /internal/*
+    respond @internal 404
+
+    reverse_proxy frontend:8080
+}
