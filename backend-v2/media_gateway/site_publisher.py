@@ -34,7 +34,7 @@ def publish_command(camera_url, central_host, port, path, username, password, pa
     query = urlencode({
         'streamid': f'publish:{stream_path(path)}:{username}:{identifier_secret(password)}',
         'passphrase': identifier_secret(passphrase), 'pbkeylen': 32, 'pkt_size': 1316,
-        'mode': 'caller', 'connect_timeout': 3000, 'rw_timeout': 5000000,
+        'mode': 'caller', 'connect_timeout': 3000, 'timeout': 5000000,
     }, safe=':/')
     return ['ffmpeg', '-nostdin', '-loglevel', 'quiet', '-rtsp_transport', 'tcp', '-timeout', '5000000',
             '-i', camera_url, '-map', '0:v:0', '-c:v', 'copy', '-f', 'mpegts',
@@ -51,11 +51,13 @@ def main():
     stopping = Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stopping.set())
+    # In particular, never inherit FFREPORT, which can write secret-bearing args.
+    process_env = {key: os.environ[key] for key in ('PATH', 'SYSTEMROOT', 'WINDIR') if key in os.environ}
     delay = 0.5
     while not stopping.is_set():
         started = monotonic()
         with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL) as publisher:
+                              stderr=subprocess.DEVNULL, env=process_env) as publisher:
             try:
                 while publisher.poll() is None and not stopping.wait(0.25):
                     pass

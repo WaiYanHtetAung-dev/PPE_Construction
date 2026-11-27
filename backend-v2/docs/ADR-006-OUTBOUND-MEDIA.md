@@ -30,7 +30,7 @@ outbound transport while keeping ingestion separate from browser playback.
    This prevents a publisher bypassing SRT encryption through central RTSP.
    Disable unused protocols, recording and public control endpoints. Deny central
    egress to the CCTV LAN. The RTSP adapter accepts only an operator-configured
-   central IPv4 endpoint and exact paths, and has no camera LAN credentials.
+   central loopback IPv4 endpoint and exact paths, and has no camera LAN credentials.
 3. Treat the SRT stream ID as visible connection metadata. Before exposing real
    credentials on an untrusted route, protect the SRT handshake with an
    outbound-initiated encrypted site tunnel restricted to the central ingress.
@@ -83,7 +83,7 @@ developer machine with the tools installed and the frontend already built:
 Push-Location backend-v2
 $env:PPE_OUTBOUND_RUN = '1'
 $env:PPE_MEDIAMTX = (Resolve-Path 'D:\path\to\mediamtx.exe').Path
-python -m pytest -q tests/media_outbound_integration.py
+python -m pytest -q --tb=short tests/media_outbound_integration.py
 Pop-Location
 ```
 

@@ -43,4 +43,4 @@ jobs:
         run: |
           python -m pip install -r requirements-browser-smoke.txt -r requirements-media-test.txt
           python -m playwright install --with-deps chromium
-          PPE_OUTBOUND_RUN=1 PPE_MEDIAMTX="$RUNNER_TEMP/mediamtx" python -m pytest -q tests/media_outbound_integration.py
+          PPE_OUTBOUND_RUN=1 PPE_MEDIAMTX="$RUNNER_TEMP/mediamtx" python -m pytest -q --tb=short tests/media_outbound_integration.py

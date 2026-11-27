@@ -159,7 +159,10 @@ def create_preview_service(bindings, token):
             raise HTTPException(503, 'Camera preview unavailable')
         epoch = state.opens
         async with encoder:
-            data = await to_thread.run_sync(encode_clip, tuple(state.frames))
+            try:
+                data = await to_thread.run_sync(encode_clip, tuple(state.frames))
+            except (av.error.FFmpegError, ValueError):
+                raise HTTPException(503, 'Camera preview unavailable') from None
         if (len(data) > MAX_PREVIEW_BYTES or state.opens != epoch
                 or not state.status(clock()).preview_available):
             raise HTTPException(503, 'Camera preview unavailable')

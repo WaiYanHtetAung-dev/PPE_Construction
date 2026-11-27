@@ -9,7 +9,7 @@ from media_gateway.site_publisher import publish_command
 
 
 def test_network_source_rejects_non_ingress_and_unsafe_paths():
-    for host, path in (('example.invalid', 'fixture'), ('8.8.8.8', 'fixture'),
+    for host, path in (('example.invalid', 'fixture'), ('8.8.8.8', 'fixture'), ('10.1.2.3', 'fixture'),
                        ('127.0.0.1', '../fixture'), ('127.0.0.1', 'fixture?pass=oops')):
         with pytest.raises(ValueError):
             central_rtsp_source(host, 8554, path, 'reader', 's' * 24)

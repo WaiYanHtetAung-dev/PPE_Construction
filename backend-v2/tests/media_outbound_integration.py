@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from secrets import token_urlsafe
 from threading import Thread
@@ -26,8 +27,20 @@ from tests.browser_smoke import smoke_origin  # noqa: F401
 
 HOST = '127.0.0.1'
 ALIAS = 'stream:smoke-camera'
-QUIET = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL}
+QUIET = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL,
+         'env': {key: value for key, value in os.environ.items() if key.upper() != 'FFREPORT'}}
 pytestmark = pytest.mark.skipif(os.getenv('PPE_OUTBOUND_RUN') != '1', reason='Requires test MediaMTX and FFmpeg binaries')
+
+
+@dataclass(frozen=True)
+class MediaHarness:
+    origin: str
+    camera: str
+    organization_path: str
+    metrics_origin: str
+    token: str = field(repr=False)
+    metrics_auth: tuple[str, str] = field(repr=False)
+    publisher: list[str] = field(repr=False)
 
 
 def wait_until(check, timeout=15):
@@ -76,7 +89,7 @@ def process(*args):
 def media_config(path, rtsp, users, paths, srt=None, metrics=None):
     settings = dict(logLevel='error', rtspAddress=f'{HOST}:{rtsp}', rtspTransports=['tcp'],
                     authInternalUsers=users, paths=paths, rtmp=False, hls=False, webrtc=False,
-                    moq=False, srt=srt is not None, metrics=metrics is not None,
+                    moq=False, srt=srt is not None, metrics=metrics is not None, readTimeout='4s',
                     pathDefaults={'overridePublisher': False})
     if srt is not None:
         settings['srtAddress'] = f'{HOST}:{srt}'
@@ -115,31 +128,55 @@ def reject_publisher(command):
     assert result.returncode != 0, 'MediaMTX accepted an unauthorized publication'
 
 
+def ingest_metrics(media):
+    with httpx.Client(trust_env=False, timeout=2) as scraper:
+        response = scraper.get(media.metrics_origin, auth=media.metrics_auth)
+    assert response.status_code == 200
+    return response.text.splitlines()
+
+
 def test_outbound_encrypted_media_and_browser(mount_media, smoke_origin, admin_account):
-    media_url, camera, camera_path, token, central_metrics, metrics_auth, command = mount_media
-    with httpx.Client(base_url=media_url, trust_env=False, timeout=2) as client:
-        path = f'/internal/v1/cameras/{camera}/status'
+    media = mount_media
+    with httpx.Client(base_url=media.origin, trust_env=False, timeout=2) as client:
+        path = f'/internal/v1/cameras/{media.camera}/status'
         params = {'stream_ref': ALIAS}
-        headers = {'Authorization': f'Bearer {token}'}
+        headers = {'Authorization': f'Bearer {media.token}'}
         assert client.get(path, params=params).status_code == 401
         assert client.get(path, params={'stream_ref': 'stream:other'}, headers=headers).status_code == 404
-        status = lambda: client.get(path, params=params, headers=headers).json()
+
+        def status():
+            return client.get(path, params=params, headers=headers).json()
+
         assert status()['state'] == 'offline'
-        with process(*command):
-            wait_until(lambda: status()['preview_available'])
-            with httpx.Client(trust_env=False, timeout=2) as scraper:
-                counters = scraper.get(central_metrics, auth=metrics_auth)
-            assert counters.status_code == 200
+        with process(*media.publisher) as publisher:
+            try:
+                wait_until(lambda: status()['preview_available'])
+            except pytest.fail.Exception:
+                probe = client.get('/internal/v1/metrics', headers=headers).json()[media.camera]
+                ingress_seen = any(line.startswith('srt_conns{') and 'pilot-one' in line
+                                   for line in ingest_metrics(media))
+                print(f'Synthetic ingress publisher_exit={publisher.poll()} ingest={ingress_seen} gateway={probe}')
+                raise
             assert any(line.startswith('paths_inbound_bytes{') and 'pilot-one' in line
-                       and float(line.rsplit(' ', 1)[-1]) > 0 for line in counters.text.splitlines())
-            metrics = client.get('/internal/v1/metrics', headers=headers).json()[camera]
+                       and float(line.rsplit(' ', 1)[-1]) > 0 for line in ingest_metrics(media))
+            metrics = client.get('/internal/v1/metrics', headers=headers).json()[media.camera]
             assert metrics['decoded_frames_total'] >= 2 and metrics['decoded_payload_bytes_total'] > 0
             assert 0 <= metrics['queue_depth'] <= 1 and metrics['processing_latency_ms'] >= 0
-            check_browser(smoke_origin, camera, camera_path, admin_account)
+            try:
+                check_browser(smoke_origin, media.camera, media.organization_path, admin_account)
+            except AssertionError:
+                probe = client.get('/internal/v1/metrics', headers=headers).json()[media.camera]
+                print(f'Synthetic preview diagnostics publisher_exit={publisher.poll()} metrics={probe}')
+                raise
         wait_until(lambda: status()['state'] == 'offline')
-        with process(*command):
+        assert client.get(path.replace('/status', '/preview'), params=params, headers=headers).status_code == 503
+        # A terminated caller can leave an SRT session until the server read deadline.
+        # Preserve overridePublisher=false and wait for that session to disappear.
+        wait_until(lambda: not any(line.startswith('srt_conns{') and 'path="pilot-one"' in line
+                                   for line in ingest_metrics(media)))
+        with process(*media.publisher):
             wait_until(lambda: status()['preview_available'])
-            assert client.get('/internal/v1/metrics', headers=headers).json()[camera]['reconnect_attempts'] > 0
+            assert client.get('/internal/v1/metrics', headers=headers).json()[media.camera]['reconnect_attempts'] > 0
 
 
 def check_browser(origin, camera, organization_path, admin_account):
@@ -156,7 +193,7 @@ def check_browser(origin, camera, organization_path, admin_account):
             page.get_by_label('Password').fill(admin_account['password'])
             page.get_by_role('button', name='Sign in').click()
             page.get_by_role('button', name='Check camera status').click()
-            expect(page.get_by_text('Online', exact=True)).to_be_visible()
+            expect(page.get_by_text('Online', exact=True)).to_be_visible(timeout=15000)
             with page.expect_response(f'{api}/preview') as playback:
                 page.get_by_role('button', name='Load video preview').click()
             assert playback.value.status == 200
@@ -169,7 +206,7 @@ def check_browser(origin, camera, organization_path, admin_account):
 
 
 @pytest.fixture
-def mount_media(smoke_origin, admin_account, tmp_path, monkeypatch):  # noqa: F811
+def mount_media(smoke_origin, admin_account, tmp_path, monkeypatch, request):
     # Request smoke_origin first so its synthetic camera row is available to bind.
     binary = str(Path(os.environ['PPE_MEDIAMTX']).resolve(strict=True))
     with SessionLocal() as db:
@@ -198,6 +235,8 @@ def mount_media(smoke_origin, admin_account, tmp_path, monkeypatch):  # noqa: F8
     token_file = tmp_path / 'gateway-token'
     token_file.touch(mode=0o600, exist_ok=False)
     token_file.write_text(media_token, encoding='ascii')
+    for secret_path in (token_file, lan_config, central_config):
+        request.addfinalizer(lambda path=secret_path: path.unlink(missing_ok=True))
     with process(binary, str(lan_config)), process(binary, str(central_config)):
         wait_until(lambda: listening(lan) and listening(central))
         with process(*fixture), run_preview(app) as origin:
@@ -206,5 +245,5 @@ def mount_media(smoke_origin, admin_account, tmp_path, monkeypatch):  # noqa: F8
             reject_publisher(wrong_key)
             monkeypatch.setattr(get_settings(), 'media_gateway_origin', origin)
             monkeypatch.setattr(get_settings(), 'media_gateway_token_file', str(token_file))
-            yield (origin, camera, f'organizations/{admin_account["org_id"]}', media_token,
-                   f'http://{HOST}:{metrics}/metrics', ('observer', metrics_pass), command)
+            yield MediaHarness(origin, camera, f'organizations/{admin_account["org_id"]}',
+                               f'http://{HOST}:{metrics}/metrics', media_token, ('observer', metrics_pass), command)

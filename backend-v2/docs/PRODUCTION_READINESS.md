@@ -50,7 +50,10 @@ See [offline workflow acceptance](PHASE_2_6_ACCEPTANCE.md) and the
 
 Local ADR-006 checks cover cross-organization camera denial, requests after
 logout, disabled cameras, database binding, H.264 clip encoding, and unsafe
-source configuration rejection. The [outbound media workflow](../../.github/workflows/outbound-media-ci.yml)
-records reproducible protocol and browser acceptance attempts. Site router
+source configuration rejection. On Windows, the loopback outbound test passed
+with FFmpeg 9.1, MediaMTX 1.21.3 and Chromium. It verified encrypted publication,
+wrong-path and wrong-passphrase denial, browser playback, metrics, offline clip
+denial, and reconnection. The [outbound media workflow](../../.github/workflows/outbound-media-ci.yml)
+runs the same acceptance test on Linux. Site router
 rules, WAN media, production credentials and representative capacity have no
 acceptance evidence from this slice.

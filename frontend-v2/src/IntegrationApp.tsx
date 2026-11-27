@@ -311,11 +311,6 @@ export default function IntegrationApp() {
 
         </header>
 
-        <div className="my-7 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-          Real PostgreSQL data. CCTV streaming, AI detection,
-          compliance metrics remain unavailable.
-        </div>
-
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <label className="text-sm font-medium">
             Organization

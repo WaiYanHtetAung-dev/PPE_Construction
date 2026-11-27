@@ -13,6 +13,7 @@ type Props = { cameraId: string; organizationId: string; token: string; expireSe
 export default function CameraMediaPreview({ cameraId, organizationId, token, expireSession }: Props) {
   const base = `/api/v1/organizations/${encodeURIComponent(organizationId)}/cameras/${encodeURIComponent(cameraId)}/media`;
   const [status, setStatus] = useState<MediaStatus | null>(null);
+  const [statusFailed, setStatusFailed] = useState(false);
   const [error, setError] = useState("");
   const [statusRequest, setStatusRequest] = useState(1);
   const [clipRequest, setClipRequest] = useState(0);
@@ -20,7 +21,8 @@ export default function CameraMediaPreview({ cameraId, organizationId, token, ex
 
   useEffect(() => {
     const controller = new AbortController();
-    void (async () => {
+    let timer: number | undefined;
+    async function pollStatus() {
       try {
         const response = await fetch(`${base}/status`, {
           headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
@@ -30,12 +32,28 @@ export default function CameraMediaPreview({ cameraId, organizationId, token, ex
         if (response.status === 401) return expireSession();
         if (!response.ok) throw new Error();
         const mediaStatus = await response.json() as MediaStatus;
-        if (!controller.signal.aborted) setStatus(mediaStatus);
+        if (controller.signal.aborted) return;
+        setStatus(mediaStatus);
+        setStatusFailed(false);
+        if (!mediaStatus.preview_available) {
+          setClipRequest(0);
+          setClip(null);
+        }
       } catch {
-        if (!controller.signal.aborted) setError("Camera status unavailable");
+        if (!controller.signal.aborted) {
+          setStatus(null);
+          setStatusFailed(true);
+          setClipRequest(0);
+          setClip(null);
+        }
       }
-    })();
-    return () => controller.abort();
+      if (!controller.signal.aborted) timer = window.setTimeout(() => void pollStatus(), 2000);
+    }
+    void pollStatus();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, [base, expireSession, statusRequest, token]);
 
   useEffect(() => {
@@ -68,10 +86,12 @@ export default function CameraMediaPreview({ cameraId, organizationId, token, ex
   return (
     <div className="flex flex-col items-start gap-2">
       {status && <StatusPill tone={status.state === "online" ? "blue" : "neutral"}>{labels[status.state]}</StatusPill>}
+      {statusFailed && <span role="alert">Camera status unavailable</span>}
       {error && <span role="alert">{error}</span>}
-      {!error && !status && <span role="status">Checking status…</span>}
+      {!statusFailed && !status && <span role="status">Checking status…</span>}
       <button type="button" onClick={() => {
         setError("");
+        setStatusFailed(false);
         setStatus(null);
         setClipRequest(0);
         setClip(null);
