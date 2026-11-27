@@ -65,6 +65,10 @@ jobs:
               --username=ppe_ci --dbname="$database" --set=ON_ERROR_STOP=1 --tuples-only --no-align "$@"
           }
 
+          monotonic_ms() {
+            python -c 'from time import monotonic_ns; print(monotonic_ns() // 1_000_000)'
+          }
+
           sql ppe_ci <<'SQL'
           BEGIN;
           INSERT INTO organizations (id, name, created_at)
@@ -78,13 +82,13 @@ jobs:
 
           source_revision="$(sql ppe_ci --command='SELECT version_num FROM alembic_version')"
           [[ -n "$source_revision" ]]
-          backup_start="$(date +%s%3N)"
+          backup_start="$(monotonic_ms)"
           docker exec "$POSTGRES_SERVICE" pg_dump --no-password --username=ppe_ci \
             --dbname=ppe_ci --format=custom --file=/tmp/ppe-ci-rehearsal.dump
-          backup_ms=$(( $(date +%s%3N) - backup_start ))
+          backup_ms=$(( $(monotonic_ms) - backup_start ))
 
           sql ppe_ci --command="UPDATE cameras SET name = 'After backup' WHERE id = 'restore-camera'"
-          restore_start="$(date +%s%3N)"
+          restore_start="$(monotonic_ms)"
           docker exec "$POSTGRES_SERVICE" createdb --no-password --username=ppe_ci \
             --template=template0 ppe_restore_ci
           docker exec "$POSTGRES_SERVICE" pg_restore --no-password --username=ppe_ci \
@@ -111,7 +115,8 @@ jobs:
           $$;
           SQL
 
-          restore_ms=$(( $(date +%s%3N) - restore_start ))
+          restore_ms=$(( $(monotonic_ms) - restore_start ))
+          [[ "$backup_ms" -ge 0 && "$restore_ms" -ge 0 ]]
           printf 'PPE_POSTGRES_RESTORE {"backup_ms":%d,"restore_and_verify_ms":%d}\n' \
             "$backup_ms" "$restore_ms"
       - name: Check restored schema against models
