@@ -1,0 +1,13 @@
+FROM python:3.12-slim-trixie@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.txt requirements-dev.txt requirements-inference-cpu.txt requirements-media-test.txt ./
+RUN python -m pip install --no-cache-dir -r requirements-dev.txt -r requirements-inference-cpu.txt -r requirements-media-test.txt
+COPY app app
+COPY inference_worker inference_worker
+COPY media_gateway media_gateway
+COPY tests tests
+RUN install -d -o 65532 -g 65532 /lab/control /lab/worker /lab/verifier /lab/models /lab/frames \
+      /lab/models/synthetic /lab/frames/frames
+USER 65532:65532

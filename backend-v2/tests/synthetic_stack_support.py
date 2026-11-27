@@ -98,9 +98,9 @@ def readonly_bind(source, target):
         subprocess.run([*privilege, 'umount', str(target)], check=True, timeout=10)
 
 
-def loopback_socket():
+def loopback_socket(port=0):
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(('127.0.0.1', 0))
+    listener.bind(('127.0.0.1', port))
     listener.listen()
     return listener
 
@@ -118,8 +118,8 @@ async def wait_for(check, timeout=10):
 
 
 @asynccontextmanager
-async def listener(app, cert, key):
-    with loopback_socket() as sock:
+async def listener(app, cert, key, *, port=0):
+    with loopback_socket(port) as sock:
         origin = f'https://127.0.0.1:{sock.getsockname()[1]}'
         server = TestListener(uvicorn.Config(app, ssl_certfile=str(cert), ssl_keyfile=str(key),
                                              access_log=False, log_level='warning', proxy_headers=False))

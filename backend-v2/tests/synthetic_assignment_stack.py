@@ -130,12 +130,12 @@ def provision_capacity_cameras(owner, pilot_scopes):
     return scopes, token
 
 
-def sign_manifest(root, model, signer):
+def sign_manifest(root, model, signer, *, lifetime=timedelta(minutes=15)):
     now = datetime.now(UTC)
     payload = Manifest(model_version_id=UUID(model.id), model_key=model.model_key, version=model.version,
                        artifact_ref=model.artifact_ref, artifact_sha256=model.artifact_sha256,
                        release_id=f'test-{uuid4().hex}', issued_at=now,
-                       expires_at=now + timedelta(minutes=15)).model_dump_json().encode()
+                       expires_at=now + lifetime).model_dump_json().encode()
     artifact = root / model.artifact_ref
     artifact.with_suffix('.onnx.manifest.json').write_bytes(payload)
     artifact.with_suffix('.onnx.manifest.sig').write_bytes(signer.sign(payload))

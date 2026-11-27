@@ -17,7 +17,7 @@ projects. In PowerShell from `backend-v2`:
 ```powershell
 python scripts/create_synthetic_environment.py .env.synthetic-stack
 $lab = @('--env-file', '.env.synthetic-stack', '-f', 'compose.synthetic.yaml',
-         '-f', 'compose.synthetic.media.yaml')
+         '-f', 'compose.synthetic.media.yaml', '-f', 'compose.synthetic.ai.yaml')
 docker compose @lab config --quiet
 docker compose @lab up --build --wait --wait-timeout 90
 $binding = docker compose @lab port frontend 8080
@@ -41,6 +41,13 @@ through a local RTSP relay. PostgreSQL, ingress and preview have no host ports.
 If you ran an earlier database-only lab, create a fresh environment file for
 this media run so the seeded camera has the matching gateway identity.
 
+The AI overlay runs a separate CPU ONNX service. It generates and signs a
+synthetic model per lab startup, verifies it under a restricted verifier role,
+and assigns it to the North camera. The worker reads model and frame volumes
+read-only. Internal HTTPS is pinned to a disposable CA. The snapshot and
+eligibility listeners use separate read-only PostgreSQL roles. The fixture's
+signing key exists only in the bootstrap process.
+
 ## Verify
 
 Against a fresh lab, from the same directory:
@@ -50,22 +57,27 @@ python -m pip install -r requirements-browser-smoke.txt
 python -m playwright install chromium
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state online
+docker compose @lab exec -T ai-control python -m tests.synthetic_compose_ai probe
 docker compose @lab stop --timeout 10 synthetic-site
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state offline
 docker compose @lab start synthetic-site
 python -m tests.synthetic_compose_browser --origin "http://$binding" --env-file .env.synthetic-stack --media-state online
+docker compose @lab exec -T ai-control python -m tests.synthetic_compose_ai probe
 ```
 
 The test registers a camera and advances the seeded incident. The
 [GitHub workflow](../../.github/workflows/synthetic-compose-ci.yml) starts a
 fresh stack for each run. It also verifies the two audit records in PostgreSQL
 and checks that the API role cannot insert incidents or alter audit entries.
+The ONNX probe checks worker authentication and verifies that the network frame's
+detections, camera, organization, site and model match the scoped assignment.
 
 ## Stop and recover
 
 ```powershell
 docker compose @lab ps -a
 docker compose @lab logs --tail 60 bootstrap api frontend central-media gateway-preview synthetic-site
+docker compose @lab logs --tail 60 ai-fixtures ai-bind ai-control inference-worker
 docker compose @lab down
 ```
 
@@ -75,8 +87,11 @@ file and use it in `$lab`. When you are finished with a specific disposable
 lab and want to erase its database, confirm its project in `docker compose
 @lab ps -a` and run `docker compose @lab down --volumes` with that file.
 
-The signed synthetic ONNX suite can be run separately using the
-[outbound media runbook](ADR-006-OUTBOUND-MEDIA.md#reproduce-the-synthetic-stack).
-The published UI uses the real incident read and status routes. Detection
-ingestion policy, evidence access and notifications are tracked under ADR-005
-and ADR-007.
+The test CA, certificate and model verification are valid for one hour. Run
+`down` followed by startup with the same file to renew them and keep the lab
+database. The independent revocation and worker restart suite can be run using
+the [outbound media runbook](ADR-006-OUTBOUND-MEDIA.md#reproduce-the-synthetic-stack).
+
+The published UI uses the real incident read and status routes against seeded
+fixtures. The inference probe stops at structured detections. Detection
+ingestion policy, evidence access and notifications require ADR-005 and ADR-007.

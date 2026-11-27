@@ -1,0 +1,123 @@
+x-ai: &ai
+  image: ${COMPOSE_PROJECT_NAME:?Use the generated lab environment}-ai
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: ['/tmp:size=32m,nosuid,nodev']
+  mem_limit: 768m
+  pids_limit: 128
+
+services:
+  ai-fixtures:
+    <<: *ai
+    build:
+      context: .
+      dockerfile: infra/synthetic/Dockerfile.ai
+    command: [python, -m, tests.synthetic_compose_ai, seed]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    networks: [database]
+    environment:
+      APP_ENV: synthetic-compose
+      DATABASE_URL: postgresql+psycopg://ppe_lab_owner:${PPE_LAB_OWNER_PASSWORD:?Generate a fresh lab environment}@postgres:5432/ppe_lab
+    volumes:
+      - ai_control:/lab/control
+      - ai_worker:/lab/worker
+      - ai_verifier:/lab/verifier
+      - ai_models:/lab/models
+      - ai_frames:/lab/frames
+
+  ai-bind:
+    <<: *ai
+    pull_policy: never
+    command: [python, -m, tests.synthetic_compose_ai, bind]
+    depends_on:
+      ai-fixtures:
+        condition: service_completed_successfully
+    networks: [database]
+    environment:
+      APP_ENV: synthetic-compose
+      DATABASE_URL: postgresql+psycopg://ppe_lab_owner:${PPE_LAB_OWNER_PASSWORD:?Generate a fresh lab environment}@postgres:5432/ppe_lab
+    volumes:
+      - ai_verifier:/lab/verifier:ro
+      - ai_models:/lab/models:ro
+
+  ai-control:
+    <<: *ai
+    pull_policy: never
+    network_mode: service:api
+    depends_on:
+      ai-bind:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+        restart: true
+    command: [python, -m, tests.synthetic_compose_ai, control]
+    volumes:
+      - ai_control:/lab/control:ro
+      - ai_frames:/lab/frames
+    environment:
+      ASSIGNMENT_DATABASE_URL_FILE: /lab/control/assignment.url
+      ELIGIBILITY_DATABASE_URL_FILE: /lab/control/eligibility.url
+      ELIGIBILITY_TOKEN_FILE: /lab/control/eligibility.token
+      PPE_LAB_READER_PASSWORD: ${PPE_LAB_READER_PASSWORD:?Generate a media lab environment}
+    healthcheck:
+      test: [CMD, python, -m, tests.synthetic_compose_ai, check-control]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  inference-worker:
+    <<: *ai
+    pull_policy: never
+    network_mode: service:api
+    depends_on:
+      ai-control:
+        condition: service_healthy
+        restart: true
+    command:
+      - python
+      - -m
+      - uvicorn
+      - inference_worker.service:from_environment
+      - --factory
+      - --host
+      - 127.0.0.1
+      - --port
+      - '8448'
+      - --ssl-certfile
+      - /lab/worker/listener.pem
+      - --ssl-keyfile
+      - /lab/worker/listener.key
+      - --no-access-log
+    volumes:
+      - ai_worker:/lab/worker:ro
+      - ai_models:/lab/models:ro
+      - ai_frames:/lab/frames:ro
+    environment:
+      ELIGIBILITY_AUTHORITY_URL: https://127.0.0.1:8447
+      ELIGIBILITY_AUTHORITY_CA_FILE: /lab/worker/ca.pem
+      ELIGIBILITY_TOKEN_FILE: /lab/worker/eligibility.token
+      INFERENCE_TOKEN_FILE: /lab/worker/worker.token
+      INFERENCE_SIGNER_PUBLIC_KEY: /lab/worker/signer.pub
+      INFERENCE_RUNTIME_FACTORY: inference_worker.onnx_cpu:factory
+      MODEL_ARTIFACT_NAMESPACE: synthetic
+      INFERENCE_FRAME_NAMESPACE: frames
+      INFERENCE_MODEL_ROOT: /lab/models
+      INFERENCE_FRAME_ROOT: /lab/frames
+      INFERENCE_MAX_MODEL_BYTES: '1048576'
+      INFERENCE_MAX_FRAME_BYTES: '1048576'
+    healthcheck:
+      test: [CMD, python, -m, tests.synthetic_compose_ai, check-worker]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+volumes:
+  ai_control:
+  ai_worker:
+  ai_verifier:
+  ai_models:
+  ai_frames:

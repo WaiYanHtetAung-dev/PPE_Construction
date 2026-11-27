@@ -4,6 +4,12 @@ Status: IMPLEMENTATION TASK; not evidence of completion or deployment.
 Requested scope: finish a reproducible non-production integration of React frontend, FastAPI backend, PostgreSQL, synthetic ONNX inference, and outbound-only media transport on the existing feature branch.
 Baseline: 7fab0e2 (feature/frontend-v2-integration). Do not reset local changes.
 
+Use the [disposable Compose lab](SYNTHETIC_COMPOSE.md) for the integrated
+browser, PostgreSQL, outbound media and independent synthetic ONNX path.
+The lab covers the existing incident read and status API with seeded fixtures.
+Detection-to-incident policy and authorized evidence remain under ADR-005 and
+ADR-007. The linked GitHub workflow records execution evidence for each commit.
+
 ## Required result
 
 One documented, repeatable **disposable** test environment in which a user can log in, select an authorized organization, register/view a demo camera, observe a synthesized outbound media stream, receive model-agnostic detections from a separate ONNX worker, see a deduplicated incident, inspect authorized evidence and receive an incident status update. Failure cases must be tested, not merely described. No live CCTV, commercial model or production deployment implied.

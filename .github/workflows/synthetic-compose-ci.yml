@@ -31,7 +31,7 @@ jobs:
         run: |
           python scripts/create_synthetic_environment.py "$RUNNER_TEMP/.env.synthetic-stack"
           compose=(docker compose --env-file "$RUNNER_TEMP/.env.synthetic-stack"
-            -f compose.synthetic.yaml -f compose.synthetic.media.yaml)
+            -f compose.synthetic.yaml -f compose.synthetic.media.yaml -f compose.synthetic.ai.yaml)
           "${compose[@]}" config --quiet
           "${compose[@]}" up --build --wait --wait-timeout 90
           binding="$("${compose[@]}" port frontend 8080)"
@@ -45,14 +45,17 @@ jobs:
       - name: Verify outbound publication, camera disconnect and recovery
         run: |
           file="$RUNNER_TEMP/.env.synthetic-stack"
-          compose=(docker compose --env-file "$file" -f compose.synthetic.yaml -f compose.synthetic.media.yaml)
+          compose=(docker compose --env-file "$file"
+            -f compose.synthetic.yaml -f compose.synthetic.media.yaml -f compose.synthetic.ai.yaml)
           probe=(python -m tests.synthetic_compose_browser --origin "$LAB_ORIGIN" --env-file "$file")
           "${probe[@]}" --media-state online
           "${compose[@]}" exec -T synthetic-site python -m tests.synthetic_compose_media check-uplink
+          "${compose[@]}" exec -T ai-control python -m tests.synthetic_compose_ai probe
           "${compose[@]}" stop --timeout 10 synthetic-site
           "${probe[@]}" --media-state offline
           "${compose[@]}" start synthetic-site
           "${probe[@]}" --media-state online
+          "${compose[@]}" exec -T ai-control python -m tests.synthetic_compose_ai probe
       - name: Check persisted incident audit and restricted database role
         run: |
           result="$(docker compose --env-file "$RUNNER_TEMP/.env.synthetic-stack" -f compose.synthetic.yaml \
@@ -73,10 +76,12 @@ jobs:
         run: |
           file="$RUNNER_TEMP/.env.synthetic-stack"
           if [[ -f "$file" ]]; then
-            compose=(docker compose --env-file "$file" -f compose.synthetic.yaml -f compose.synthetic.media.yaml)
+            compose=(docker compose --env-file "$file"
+              -f compose.synthetic.yaml -f compose.synthetic.media.yaml -f compose.synthetic.ai.yaml)
             "${compose[@]}" ps -a
             if [[ "${{ job.status }}" == failure ]]; then
-              "${compose[@]}" logs --tail 30 bootstrap api frontend central-media gateway-preview synthetic-site
+              "${compose[@]}" logs --tail 30 bootstrap api frontend central-media gateway-preview synthetic-site \
+                ai-fixtures ai-bind ai-control inference-worker
             fi
             "${compose[@]}" down --volumes
           fi
